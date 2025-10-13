@@ -134,15 +134,25 @@ if uploaded_file is not None:
 '''
 
     # --- Clickable transcript ---
+    def format_time(seconds):
+        h = int(seconds // 3600)
+        m = int((seconds % 3600) // 60)
+        s = int(seconds % 60)
+        if h > 0:
+            return f"{h:02}:{m:02}:{s:02}"
+        else:
+            return f"{m:02}:{s:02}"
+
     for i, seg in enumerate(result["segments"]):
         start = round(seg["start"], 1)
         end = round(seg["end"], 1)
         text = seg["text"].replace("\n"," ")
+        time_str = format_time(start)
         transcript_html += f"""
         <p id="seg{i}" data-start="{start}" data-end="{end}" 
            style="cursor:pointer;color:blue;margin:2px 0;" 
            onclick="document.getElementById('audio').currentTime={start}; document.getElementById('audio').play();">
-           ▶️ [{start:.1f}s] {text}
+           ▶️ [{time_str}] {text}
         </p>
         """
 
