@@ -42,6 +42,7 @@ pip install streamlit_javascript    # nếu muốn thử phiên bản cũ (khôn
 ## 3️⃣ Chạy ứng dụng 
 
 ```bash
+source venv/bin/activate
 streamlit run podcast_transcriber.py --server.maxUploadSize=1024
 ```
 Chạy trực tiếp từ dòng lệnh với giới hạn 1GB

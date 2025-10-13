@@ -129,9 +129,25 @@ if uploaded_file is not None:
 
     audio_base64 = get_audio_base64(temp_audio.name)
     transcript_html = f'''
-<audio id="audio" controls src="data:audio/mp3;base64,{audio_base64}"></audio>
-<div id="transcript" style="margin-top:10px;">
-'''
+        <style>
+        #fixed-audio {{
+            position: fixed;
+            top: 0px;
+            left: 0px;
+            right: 0px;
+            z-index: 9999;
+            background: #fff;
+            padding: 0px 0 0px 0;
+        }}
+        body {{
+            padding-top: 60px;
+        }}
+        </style>
+        <div id="fixed-audio">
+            <audio id="audio" controls src="data:audio/mp3;base64,{audio_base64}"></audio>
+        </div>
+        <div id="transcript" style="margin-top:10px;">
+        '''
 
     # --- Clickable transcript ---
     def format_time(seconds):
@@ -157,23 +173,32 @@ if uploaded_file is not None:
         """
 
     transcript_html += """
-    </div>
-    <script>
-    const audio = document.getElementById('audio');
-    const segments = Array.from(document.querySelectorAll('#transcript p'));
-    audio.addEventListener('timeupdate', function() {
-        const current = audio.currentTime;
-        segments.forEach(seg => {
-            const start = parseFloat(seg.dataset.start);
-            const end = parseFloat(seg.dataset.end);
-            if (current >= start && current < end) {
-                seg.style.background = '#ffe066';
-            } else {
-                seg.style.background = '';
-            }
+            </div>
+            <script>
+        const audio = document.getElementById('audio');
+        const segments = Array.from(document.querySelectorAll('#transcript p'));
+        let lastActive = null;
+
+        audio.addEventListener('timeupdate', function() {
+            const current = audio.currentTime;
+            segments.forEach(seg => {
+                const start = parseFloat(seg.dataset.start);
+                const end = parseFloat(seg.dataset.end);
+                if (current >= start && current < end) {
+                    if (lastActive !== seg) {
+                        // Remove previous highlight
+                        if (lastActive) lastActive.style.background = '';
+                        // Highlight current line
+                        seg.style.background = '#ffe066';
+                        seg.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        lastActive = seg;
+                    }
+                } else {
+                    seg.style.background = '';
+                }
+            });
         });
-    });
-    </script>
+        </script>
     """
 
     components.html(transcript_html, height=400, scrolling=True)
