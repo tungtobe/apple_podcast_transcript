@@ -128,19 +128,43 @@ if uploaded_file is not None:
         return base64.b64encode(data).decode("utf-8")
 
     audio_base64 = get_audio_base64(temp_audio.name)
-    transcript_html = f'<audio id="audio" controls src="data:audio/mp3;base64,{audio_base64}"></audio><div style="margin-top:10px;">'
+    transcript_html = f'''
+<audio id="audio" controls src="data:audio/mp3;base64,{audio_base64}"></audio>
+<div id="transcript" style="margin-top:10px;">
+'''
 
     # --- Clickable transcript ---
     for i, seg in enumerate(result["segments"]):
         start = round(seg["start"], 1)
+        end = round(seg["end"], 1)
         text = seg["text"].replace("\n"," ")
         transcript_html += f"""
-        <p style="cursor:pointer;color:blue;margin:2px 0;" 
+        <p id="seg{i}" data-start="{start}" data-end="{end}" 
+           style="cursor:pointer;color:blue;margin:2px 0;" 
            onclick="document.getElementById('audio').currentTime={start}; document.getElementById('audio').play();">
            ▶️ [{start:.1f}s] {text}
         </p>
         """
-    transcript_html += "</div>"
+
+    transcript_html += """
+    </div>
+    <script>
+    const audio = document.getElementById('audio');
+    const segments = Array.from(document.querySelectorAll('#transcript p'));
+    audio.addEventListener('timeupdate', function() {
+        const current = audio.currentTime;
+        segments.forEach(seg => {
+            const start = parseFloat(seg.dataset.start);
+            const end = parseFloat(seg.dataset.end);
+            if (current >= start && current < end) {
+                seg.style.background = '#ffe066';
+            } else {
+                seg.style.background = '';
+            }
+        });
+    });
+    </script>
+    """
 
     components.html(transcript_html, height=400, scrolling=True)
 
