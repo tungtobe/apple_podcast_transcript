@@ -17,7 +17,7 @@ st.title("🎧 Podcast → Japanese Text")
 # --- Sidebar options ---
 st.sidebar.header("⚙️ Settings")
 mode = st.sidebar.radio("Model AI", ["Local Whisper", "OpenAI API"])
-model_size = st.sidebar.selectbox("Model Whisper (local)", ["base", "small", "medium"])
+model_size = st.sidebar.selectbox("Model Whisper (local)", ["small", "medium"])
 force_rerun = st.sidebar.checkbox("Chạy lại dù đã có cache", value=False)
 language = st.sidebar.selectbox("Ngôn ngữ", ["ja", "auto"], index=0)
 
