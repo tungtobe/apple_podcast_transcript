@@ -31,7 +31,7 @@ venv\Scripts\activate      # Windows
 Cài đặt thư viện cần thiết:
 
 ```bash
-pip install streamlit openai faster-whisper  
+pip install streamlit openai faster-whisper google-generativeai python-dotenv
 pip install streamlit_javascript    # nếu muốn thử phiên bản cũ (không cần base64)
 ```
 

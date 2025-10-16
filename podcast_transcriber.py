@@ -1,8 +1,12 @@
 import streamlit as st
 import os, tempfile, json, math, hashlib, platform, base64
 from pathlib import Path
-import openai
+import google.generativeai as genai
 import streamlit.components.v1 as components
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 try:
     from faster_whisper import WhisperModel
@@ -16,16 +20,21 @@ st.title("🎧 Podcast → Japanese Text")
 
 # --- Sidebar options ---
 st.sidebar.header("⚙️ Settings")
-mode = st.sidebar.radio("Model AI", ["Local Whisper", "OpenAI API"])
+mode = st.sidebar.radio("Model AI", ["Local Whisper", "Gemini API"])
 model_size = st.sidebar.selectbox("Model Whisper (local)", ["small", "medium"])
 force_rerun = st.sidebar.checkbox("Chạy lại dù đã có cache", value=False)
 language = st.sidebar.selectbox("Ngôn ngữ", ["ja", "auto"], index=0)
 
-# OpenAI API key check
-if mode == "OpenAI API":
-    openai.api_key = os.getenv("OPENAI_API_KEY")
-    if not openai.api_key:
-        st.warning("⚠️ OPENAI_API_KEY chưa được set trong môi trường")
+# Gemini API key check
+gemini_available = False
+gemini_api_key = os.getenv("GEMINI_API_KEY")
+gemini_model = os.getenv("GEMINI_MODEL")
+if gemini_api_key:
+    genai.configure(api_key=gemini_api_key)
+    gemini_available = True
+else:
+    if mode == "Gemini API":
+        st.warning("⚠️ GEMINI_API_KEY chưa được set trong file .env")
 
 # --- File upload ---
 uploaded_file = st.file_uploader("📂 Chọn file podcast (mp3, m4a...)", type=["mp3","m4a","wav","aac"])
@@ -53,6 +62,7 @@ if uploaded_file is not None:
     cache_json = os.path.join(CACHE_DIR, f"{file_hash}.json")
     cache_txt  = os.path.join(CACHE_DIR, f"{file_hash}.txt")
     cache_srt  = os.path.join(CACHE_DIR, f"{file_hash}.srt")
+    cache_memo = os.path.join(CACHE_DIR, f"{file_hash}_memo.txt")
 
     use_cache = os.path.exists(cache_json) and not force_rerun
 
@@ -64,15 +74,46 @@ if uploaded_file is not None:
         st.info("⚡ Chạy nhận dạng mới...")
         with st.spinner("Đang nhận dạng, vui lòng chờ..."):
             result = {"segments": []}
-            if mode == "OpenAI API":
-                with open(temp_audio.name, "rb") as f:
-                    transcript = openai.audio.transcriptions.create(
-                        model="gpt-4o-mini-transcribe",
-                        file=f,
-                        response_format="verbose_json",
-                        language=language
-                    )
-                result["segments"] = transcript["segments"]
+            if mode == "Gemini API":
+                if not gemini_available:
+                    st.error("⚠️ GEMINI_API_KEY không tồn tại. Vui lòng thêm vào file .env")
+                else:
+                    # Upload audio file to Gemini
+                    audio_file = genai.upload_file(temp_audio.name)
+                    
+                    # Use Gemini for transcription
+                    model = genai.GenerativeModel(gemini_model)
+                    prompt = f"""Transcribe this audio file to text. 
+                    Return the result as a JSON array of segments with this exact format:
+                    [{{"start": 0.0, "end": 5.2, "text": "transcribed text"}}, ...]
+                    
+                    Important:
+                    - Each segment should be 5-15 seconds long
+                    - Include accurate timestamps in seconds
+                    - Return ONLY the JSON array, no other text
+                    - Language: {"Japanese" if language == "ja" else "auto-detect"}
+                    """
+                    
+                    response = model.generate_content([prompt, audio_file])
+                    
+                    # Parse response
+                    try:
+                        response_text = response.text.strip()
+                        # Remove markdown code blocks if present
+                        if response_text.startswith("```"):
+                            response_text = response_text.split("```")[1]
+                            if response_text.startswith("json"):
+                                response_text = response_text[4:]
+                        response_text = response_text.strip()
+                        
+                        segments = json.loads(response_text)
+                        result["segments"] = segments
+                    except json.JSONDecodeError:
+                        st.error("❌ Lỗi parse JSON từ Gemini response")
+                        st.text(response.text)
+                    
+                    # Clean up uploaded file
+                    genai.delete_file(audio_file.name)
             else:
                 if not faster_whisper_installed:
                     st.error("⚠️ faster-whisper chưa cài đặt. Chạy: pip install faster-whisper")
@@ -203,7 +244,83 @@ if uploaded_file is not None:
 
     components.html(transcript_html, height=400, scrolling=True)
 
+    # --- Generate Memo Section ---
+    st.markdown("---")
+    st.markdown("### 📝 議事録メモ生成")
+    
+    if gemini_available:
+        memo_exists = os.path.exists(cache_memo)
+        
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            generate_memo = st.button("📋 メモを生成", disabled=memo_exists and not force_rerun)
+        with col2:
+            if memo_exists and not force_rerun:
+                st.info("✓ メモは既に生成されています")
+        
+        if generate_memo or (memo_exists and not force_rerun):
+            if generate_memo:
+                with st.spinner("AIがメモを生成中..."):
+                    # Get full transcript text
+                    full_text = " ".join([seg["text"] for seg in result["segments"]])
+                    
+                    # Generate memo using Gemini
+                    try:
+                        model = genai.GenerativeModel(gemini_model)
+                        
+                        prompt = f"""あなたは議事録作成のプロフェッショナルです。
+会議やポッドキャストの内容から、以下のフォーマットで日本語のメモを作成してください：
+
+## 主な内容
+* [トピック1]
+   * 詳細なポイント、重要な発言、具体的な内容
+   * 関連する情報やメモ
+* [トピック2]
+   * 詳細なポイント
+   
+## Next Action
+* 具体的なアクションアイテムがあればリストアップ
+* 担当者や期限が言及されていれば記載
+
+## まとめ
+全体の要約と重要なポイントを簡潔にまとめる
+
+箇条書きを効果的に使用し、読みやすく構造化してください。
+
+以下のトランスクリプトから議事録メモを作成してください：
+
+{full_text}"""
+                        
+                        response = model.generate_content(prompt)
+                        memo_content = response.text
+                        
+                        # Save memo to cache
+                        with open(cache_memo, "w", encoding="utf-8") as f:
+                            f.write(memo_content)
+                        
+                        st.success("✅ メモ生成完了！")
+                    except Exception as e:
+                        st.error(f"❌ エラーが発生しました: {str(e)}")
+                        memo_content = None
+            else:
+                # Load cached memo
+                with open(cache_memo, "r", encoding="utf-8") as f:
+                    memo_content = f.read()
+            
+            if memo_content:
+                st.markdown("---")
+                st.markdown(memo_content)
+                st.download_button(
+                    "📥 メモをダウンロード (.txt)", 
+                    memo_content, 
+                    file_name="meeting_memo.txt", 
+                    mime="text/plain"
+                )
+    else:
+        st.warning("⚠️ メモ生成にはGEMINI_API_KEYが必要です (.envファイルに設定してください)")
+
     # --- Download buttons ---
+    st.markdown("---")
     st.markdown("### 💾 Xuất transcript")
     st.download_button("📄 Tải transcript (.txt)", open(cache_txt).read(), file_name="transcript.txt", mime="text/plain")
     st.download_button("🎬 Tải phụ đề (.srt)", open(cache_srt).read(), file_name="transcript.srt", mime="text/plain")
