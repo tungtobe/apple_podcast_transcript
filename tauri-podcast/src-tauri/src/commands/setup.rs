@@ -10,6 +10,17 @@ pub struct SetupStatus {
     pub missing_packages: Vec<String>,
 }
 
+async fn check_ffmpeg_available() -> bool {
+    tokio::process::Command::new("ffmpeg")
+        .arg("-version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
 /// Check Python version, ffmpeg, and required pip packages.
 /// Runs python/setup_check.py and returns parsed JSON.
 #[tauri::command]
@@ -19,17 +30,21 @@ pub async fn check_setup(app: AppHandle) -> Result<SetupStatus, String> {
         .resource_dir()
         .map_err(|e| format!("Cannot find resource dir: {e}"))?;
 
-    // In dev mode resources are in the project root; in release they're in Contents/Resources
-    let script = resource_dir.join("python/setup_check.py");
+    let script = crate::python::resolve_script(&resource_dir, "setup_check.py");
     let script_str = script.to_string_lossy().to_string();
 
     // Find any available python3 for initial check (before venv exists)
-    let python = {
-        let app_data = app
-            .path()
-            .app_data_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
-        crate::python::resolve_python(&app_data)
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
+    let Some(python) = crate::python::find_python(&app_data) else {
+        return Ok(SetupStatus {
+            python_ok: false,
+            python_version: None,
+            ffmpeg_ok: check_ffmpeg_available().await,
+            missing_packages: Vec::new(),
+        });
     };
 
     let output = tokio::process::Command::new(&python)
@@ -72,7 +87,9 @@ pub async fn install_deps(app: AppHandle, packages: Vec<String>) -> Result<(), S
     if !venv_dir.exists() {
         app.emit("install:progress", "⚙️ Creating isolated Python environment...").ok();
 
-        let python = crate::python::resolve_python(&app_data_dir);
+        let python = crate::python::find_python(&app_data_dir).ok_or_else(|| {
+            "Python 3.10+ is required before packages can be installed. Install Python from https://www.python.org/downloads/macos/ or run `brew install python`, then click Check Again.".to_string()
+        })?;
         let status = tokio::process::Command::new(&python)
             .args(["-m", "venv", venv_dir.to_str().unwrap_or("/tmp/venv")])
             .status()

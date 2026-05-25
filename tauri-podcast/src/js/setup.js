@@ -31,6 +31,9 @@ window.addEventListener('DOMContentLoaded', async () => {
 });
 
 async function runCheck() {
+  const error = document.getElementById('error-banner');
+  if (error) error.setAttribute('hidden', '');
+
   setAllIcons('⏳');
   btnRecheck()?.setAttribute('disabled', '');
   btnInstall()?.setAttribute('disabled', '');
@@ -54,12 +57,19 @@ function applyStatus(status) {
   } else {
     iconPython().textContent = '❌';
     detailPython().innerHTML =
-      `Python 3.10+ required. Version found: ${status.python_version || 'none'}<br>
-       <a href="https://www.python.org/downloads/" class="check-code">Download python.org ↗</a>`;
+      `Python 3.10+ is required. Version found: ${status.python_version || 'none'}<br>
+       Install with <code class="check-code">brew install python</code> or
+       <a href="https://www.python.org/downloads/macos/" class="check-code">download Python for macOS ↗</a>.
+       Then click Check Again.`;
   }
 
   // Packages
-  if (status.missing_packages.length === 0) {
+  if (!status.python_ok) {
+    iconPkgs().textContent = '⏸';
+    detailPkgs().textContent = 'Install Python first, then the app can check Python packages.';
+    btnInstall()?.setAttribute('hidden', '');
+    btnInstall()?.setAttribute('disabled', '');
+  } else if (status.missing_packages.length === 0) {
     iconPkgs().textContent = '✅';
     detailPkgs().textContent = 'All packages installed.';
     btnInstall()?.setAttribute('hidden', '');
@@ -78,7 +88,8 @@ function applyStatus(status) {
     iconFfmpeg().textContent = '⚠️';
     detailFfmpeg().innerHTML =
       `ffmpeg not found. Install with:<br>
-       <code class="check-code">brew install ffmpeg</code>`;
+       <code class="check-code">brew install ffmpeg</code><br>
+       If <code class="check-code">brew</code> is not available, install Homebrew first.`;
   }
 
   // Enable recheck always

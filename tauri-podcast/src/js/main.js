@@ -124,7 +124,7 @@ async function startTranscription() {
         modelSize:     settings.whisperModelSize  || 'small',
         language:      settings.language          || 'ja',
         apiKey:        settings.geminiApiKey      || null,
-        geminiModel:   settings.geminiModel       || 'gemini-2.0-flash',
+        geminiModel:   settings.geminiModel       || 'gemini-3.5-flash',
         forceRerun:    settings.forceRerun        || false,
         cacheDir:      cacheDir,
       }
@@ -382,7 +382,7 @@ async function generateMemo() {
       req: {
         transcriptJsonPath,
         apiKey:        settings.geminiApiKey,
-        geminiModel:   settings.geminiModel || 'gemini-2.0-flash',
+        geminiModel:   settings.geminiModel || 'gemini-3.5-flash',
         memoPromptTemplate,
         cacheMemoPath: memoOutputPath,
         forceRerun:    settings.forceRerun || false,

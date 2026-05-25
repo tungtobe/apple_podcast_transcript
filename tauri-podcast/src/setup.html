@@ -7,9 +7,14 @@
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<div class="setup-page">
+<div class="setup-shell">
+  <header class="setup-titlebar" data-tauri-drag-region>
+    <span>🎧 Transcriber-kun</span>
+  </header>
+
+  <main class="setup-page">
   <div class="setup-card">
-    <h1>🎧 Transcriber-kun</h1>
+    <h1>Setup</h1>
     <p class="subtitle">Let's make sure everything is ready before you start.</p>
 
     <div id="error-banner" class="alert alert-error" hidden></div>
@@ -79,6 +84,7 @@
       <code>~/Library/Application Support/com.transcriberkun.app/venv/</code>
     </p>
   </div>
+  </main>
 </div>
 
 <script src="js/router.js"></script>

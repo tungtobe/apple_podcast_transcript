@@ -37,7 +37,7 @@ fn default_memo_prompt_template() -> String {
 pub struct AppSettings {
     pub ai_mode: String,           // "gemini" | "whisper"
     pub gemini_api_key: String,
-    pub gemini_model: String,      // "gemini-2.0-flash" | "gemini-1.5-pro" | etc.
+    pub gemini_model: String,      // "gemini-3.5-flash" | "gemini-2.5-flash" | etc.
     pub whisper_model_size: String, // "small" | "medium"
     pub language: String,          // "ja" | "auto"
     pub force_rerun: bool,
@@ -57,7 +57,7 @@ impl Default for AppSettings {
         Self {
             ai_mode: "gemini".to_string(),
             gemini_api_key: String::new(),
-            gemini_model: "gemini-2.0-flash".to_string(),
+            gemini_model: "gemini-3.5-flash".to_string(),
             whisper_model_size: "small".to_string(),
             language: "ja".to_string(),
             force_rerun: false,
@@ -65,6 +65,13 @@ impl Default for AppSettings {
             memo_prompt_template: default_memo_prompt_template(),
         }
     }
+}
+
+fn normalize_settings(mut settings: AppSettings) -> AppSettings {
+    if settings.gemini_model == "gemini-2.0-flash" {
+        settings.gemini_model = "gemini-3.5-flash".to_string();
+    }
+    settings
 }
 
 /// Load settings from persistent store. Returns defaults if not yet saved.
@@ -76,6 +83,7 @@ pub fn get_settings(app: AppHandle) -> Result<AppSettings, String> {
 
     match store.get(SETTINGS_KEY) {
         Some(val) => serde_json::from_value(val.clone())
+            .map(normalize_settings)
             .map_err(|e| format!("Corrupt settings: {e}")),
         None => {
             // First launch — resolve default cache dir

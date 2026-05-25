@@ -54,6 +54,67 @@ def emit_error(message: str):
     emit({"type": "error", "message": message})
 
 
+def _strip_markdown_fence(text: str) -> str:
+    """Return fenced JSON content when Gemini wraps its response in ```json."""
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+
+    parts = stripped.split("```", 2)
+    if len(parts) < 2:
+        return stripped
+
+    fenced = parts[1].strip()
+    if fenced.lower().startswith("json"):
+        fenced = fenced[4:].strip()
+    return fenced
+
+
+def _decode_first_json_value(text: str):
+    """Decode the first JSON value, allowing benign Gemini text around it."""
+    candidate = _strip_markdown_fence(text)
+    decoder = json.JSONDecoder(strict=False)
+    first_error = None
+    for start, char in enumerate(candidate):
+        if char not in "[{":
+            continue
+        try:
+            return decoder.raw_decode(candidate[start:])[0]
+        except json.JSONDecodeError as e:
+            if first_error is None:
+                first_error = e
+
+    if first_error:
+        raise first_error
+    raise ValueError("Gemini response did not contain a JSON array or object.")
+
+
+def _normalize_segment(segment: dict) -> dict:
+    if not isinstance(segment, dict):
+        raise ValueError("Gemini segment is not an object.")
+
+    try:
+        start = float(segment["start"])
+        end = float(segment["end"])
+        text = str(segment["text"]).strip()
+    except (KeyError, TypeError, ValueError) as e:
+        raise ValueError(f"Gemini segment has invalid fields: {segment}") from e
+
+    return {"start": start, "end": end, "text": text}
+
+
+def parse_gemini_segments(response_text: str) -> list:
+    """Parse Gemini transcript JSON from markdown, raw JSON, or object envelopes."""
+    payload = _decode_first_json_value(response_text)
+    if isinstance(payload, dict) and isinstance(payload.get("segments"), list):
+        payload = payload["segments"]
+
+    if not isinstance(payload, list):
+        raise ValueError("Gemini response JSON must be an array of segments.")
+
+    return [_normalize_segment(segment) for segment in payload]
+
+
 def _cleanup_temp(path: str | None):
     """Silently remove a temp file if it exists."""
     if path:
@@ -143,7 +204,10 @@ def transcribe_gemini(audio_path: str, language: str, api_key: str, gemini_model
 
     # Step 2/4: Transcribe
     emit_progress(2, 4, "🤖 Sending transcription request to Gemini AI...", percent=35)
-    model = genai.GenerativeModel(gemini_model)
+    model = genai.GenerativeModel(
+        gemini_model,
+        generation_config={"response_mime_type": "application/json"},
+    )
     lang_hint = "Japanese" if language == "ja" else "auto-detect"
     prompt = f"""Transcribe this audio file to text.
 Return the result as a JSON array of segments with this exact format:
@@ -152,7 +216,8 @@ Return the result as a JSON array of segments with this exact format:
 Important:
 - Each segment should be 5-15 seconds long
 - Include accurate timestamps in seconds
-- Return ONLY the JSON array, no other text
+- Return ONLY valid JSON
+- Do not include markdown fences, explanations, or trailing text
 - Language: {lang_hint}
 """
     response = model.generate_content([prompt, audio_file])
@@ -161,15 +226,9 @@ Important:
     # Step 3/4: Parse
     emit_progress(3, 4, "🔍 Parsing JSON result...", percent=75)
     response_text = response.text.strip()
-    if response_text.startswith("```"):
-        parts = response_text.split("```")
-        response_text = parts[1]
-        if response_text.startswith("json"):
-            response_text = response_text[4:]
-    response_text = response_text.strip()
     try:
-        segments = json.loads(response_text)
-    except json.JSONDecodeError as e:
+        segments = parse_gemini_segments(response_text)
+    except (json.JSONDecodeError, ValueError) as e:
         raise ValueError(f"Failed to parse Gemini JSON response: {e}\nRaw: {response_text[:500]}")
 
     emit_progress(3, 4, "✅ JSON parsed successfully.", percent=85)
@@ -273,7 +332,7 @@ def main():
     parser.add_argument("--model-size", default="small", choices=["small", "medium"])
     parser.add_argument("--language", default="ja", choices=["ja", "auto"])
     parser.add_argument("--api-key", default=None)
-    parser.add_argument("--gemini-model", default="gemini-2.0-flash")
+    parser.add_argument("--gemini-model", default="gemini-3.5-flash")
     parser.add_argument("--cache-dir", default=".cache_transcripts")
     parser.add_argument("--force-rerun", action="store_true")
     args = parser.parse_args()

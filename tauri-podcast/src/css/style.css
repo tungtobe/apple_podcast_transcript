@@ -12,6 +12,8 @@
   --warn: #ff9500;
   --radius: 10px;
   --shadow: 0 1px 3px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.06);
+  --titlebar-safe-top: 32px;
+  --traffic-light-safe-left: 92px;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -27,14 +29,14 @@ html, body {
 
 /* ── Traffic-light safe zone (titleBarStyle: Overlay) ── */
 body {
-  padding-top: env(safe-area-inset-top, 28px);
+  padding-top: var(--titlebar-safe-top);
 }
 
 /* ── Layout ── */
 .page {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - env(safe-area-inset-top, 28px));
+  height: calc(100vh - var(--titlebar-safe-top));
   max-width: 1100px;
   margin: 0 auto;
   padding: 0 20px 20px;
@@ -45,7 +47,7 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 0 12px;
+  padding: 10px 0 12px var(--traffic-light-safe-left);
   border-bottom: 1px solid var(--border);
   -webkit-app-region: drag;
 }
@@ -57,7 +59,7 @@ body {
   flex: 1;
   text-align: center;
   color: var(--text);
-  margin-left: 70px; /* offset for traffic lights */
+  margin-left: 0;
 }
 
 /* ── Buttons ── */
@@ -360,13 +362,33 @@ input[type="checkbox"] {
 }
 
 /* ── Setup wizard ── */
+.setup-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - var(--titlebar-safe-top));
+}
+
+.setup-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 44px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  user-select: none;
+  -webkit-app-region: drag;
+}
+
 .setup-page {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 100vh;
-  padding: 40px 20px;
+  flex: 1;
+  min-height: 0;
+  padding: 20px 20px 40px;
 }
 .setup-card {
   width: 100%;

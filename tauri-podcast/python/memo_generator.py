@@ -55,7 +55,7 @@ def main():
     parser = argparse.ArgumentParser(description="Meeting memo generator")
     parser.add_argument("--transcript", required=True, help="Path to transcript JSON")
     parser.add_argument("--api-key", required=True)
-    parser.add_argument("--model", default="gemini-2.0-flash")
+    parser.add_argument("--model", default="gemini-3.5-flash")
     parser.add_argument("--prompt-template", default=MEMO_PROMPT_TEMPLATE)
     parser.add_argument("--output", required=True, help="Output path for memo .txt")
     parser.add_argument("--force-rerun", action="store_true")
