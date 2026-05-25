@@ -13,7 +13,11 @@ pub struct TranscribeSettings {
     pub gemini_model: Option<String>,
     pub force_rerun: bool,
     pub cache_dir: String,
+    #[serde(default = "default_chunk_minutes")]
+    pub chunk_minutes: u32,
 }
+
+fn default_chunk_minutes() -> u32 { 10 }
 
 /// Start a transcription job.
 ///
@@ -70,6 +74,8 @@ pub async fn transcribe(
     if settings.force_rerun {
         cmd.arg("--force-rerun");
     }
+    let chunk_minutes = if settings.chunk_minutes == 0 { 10 } else { settings.chunk_minutes };
+    cmd.arg("--chunk-minutes").arg(chunk_minutes.to_string());
 
     cmd.stdout(std::process::Stdio::piped())
         // Discard stderr to prevent pipe-buffer deadlock.

@@ -107,6 +107,8 @@ async function startTranscription() {
   document.getElementById('memo-section').setAttribute('hidden', '');
   showProgress(true, '⏳ Starting...', 0);
   showAlert(null);
+  const debugEl = document.getElementById('debug-log');
+  if (debugEl) debugEl.textContent = '';
 
   // Subscribe to events BEFORE invoking
   if (unlistenFn) { unlistenFn(); unlistenFn = null; }
@@ -127,6 +129,7 @@ async function startTranscription() {
         geminiModel:   settings.geminiModel       || 'gemini-3.5-flash',
         forceRerun:    settings.forceRerun        || false,
         cacheDir:      cacheDir,
+        chunkMinutes:  settings.chunkMinutes       || 10,
       }
     });
   } catch (err) {
@@ -142,18 +145,30 @@ function handleTranscribeEvent({ payload }) {
   if (p.type === 'progress') {
     showProgress(true, p.message, p.percent ?? 0);
 
+  } else if (p.type === 'log') {
+    appendDebugLog(p.message);
+
   } else if (p.type === 'result') {
     if (unlistenFn) { unlistenFn(); unlistenFn = null; }
     showProgress(false);
-    currentSegments = p.segments;
+    const segs = Array.isArray(p.segments) ? [...p.segments] : [];
+    segs.sort((a, b) => (parseFloat(a.start) || 0) - (parseFloat(b.start) || 0));
+    currentSegments = segs;
     if (p.cached) showAlert('📌 Loaded from cache.', 'info');
-    renderTranscript(p.segments);
+    renderTranscript(segs);
 
   } else if (p.type === 'error') {
     if (unlistenFn) { unlistenFn(); unlistenFn = null; }
     showProgress(false);
     showAlert(`❌ ${p.message}`, 'error');
   }
+}
+
+function appendDebugLog(line) {
+  const el = document.getElementById('debug-log');
+  if (!el) return;
+  el.textContent += (el.textContent ? '\n' : '') + line;
+  el.scrollTop = el.scrollHeight;
 }
 
 // ── Progress UI ────────────────────────────────────────────────────────────

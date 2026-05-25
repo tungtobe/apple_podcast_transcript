@@ -36,6 +36,7 @@ function populateForm(s) {
   setValue('language', s.language);
   document.getElementById('force-rerun').checked = s.forceRerun;
   setValue('cache-dir', s.cacheDir);
+  setValue('chunk-minutes', s.chunkMinutes ?? 10);
   setValue('memo-prompt-template', s.memoPromptTemplate);
 }
 
@@ -101,6 +102,7 @@ async function saveSettings() {
     language:         document.getElementById('language').value,
     forceRerun:       document.getElementById('force-rerun').checked,
     cacheDir:         document.getElementById('cache-dir').value,
+    chunkMinutes:     Math.max(2, Math.min(30, parseInt(document.getElementById('chunk-minutes').value, 10) || 10)),
     memoPromptTemplate: document.getElementById('memo-prompt-template').value,
   };
 

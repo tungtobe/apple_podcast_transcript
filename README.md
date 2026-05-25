@@ -1,108 +1,117 @@
-# Podcast Transcriber (Japanese)
+# Transcriber-kun (Apple Podcast Transcript)
 
-Ứng dụng Streamlit giúp chuyển file audio podcast (mp3/m4a/wav/aac) sang text tiếng Nhật, hỗ trợ:
+Ứng dụng desktop (Tauri + Rust + Python) để transcribe podcast/audio/video sang text, hỗ trợ tiếng Nhật và auto-detect. Có 2 engine:
+
+- **Gemini API** (cloud, nhanh) — tự động chia audio dài thành chunk
+- **Local Whisper** (offline, riêng tư) — `faster-whisper`
+
+Tính năng:
 
 - Click-to-seek transcript
-- Export transcript: `.txt`, `.srt`, `.json`
-- Cache tự động + force rerun
-- Sử dụng Local Whisper hoặc OpenAI API
-- Nhúng audio trực tiếp (base64)
+- Export `.txt`, `.srt`, `.json`
+- Cache theo SHA-256, có force rerun
+- Sinh memo/議事録 từ transcript (Gemini)
+- Debug log panel cho Gemini chunking
 
 ---
 
-## 1️⃣ Yêu cầu hệ thống
+## 1. Yêu cầu
 
-- Python >= 3.10
-- macOS / Windows / Linux
-- (Optional) GPU nếu muốn Local Whisper nhanh hơn
+- macOS / Linux / Windows
+- Python ≥ 3.10
+- `ffmpeg` (cắt audio, extract từ video)
+  - macOS: `brew install ffmpeg`
+  - Linux: `apt install ffmpeg`
+- Rust toolchain (để dev/build Tauri)
+- Node ≥ 18 (Tauri CLI)
 
 ---
 
-## 2️⃣ Cài đặt thư viện
-
-Tạo virtual environment:
+## 2. Cài đặt
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate   # Mac/Linux
-venv\Scripts\activate      # Windows
-````
+cd tauri-podcast
+./setup.sh          # cài Python deps + Tauri CLI
+```
 
-Cài đặt thư viện cần thiết:
+Hoặc thủ công:
 
 ```bash
-pip install streamlit openai faster-whisper google-generativeai python-dotenv
-pip install streamlit_javascript    # nếu muốn thử phiên bản cũ (không cần base64)
+cd tauri-podcast
+python3 -m venv ../venv && source ../venv/bin/activate
+pip install -r requirements.txt
+npm install
 ```
 
-> Lưu ý: Nếu không dùng Local Whisper, bạn chỉ cần `openai` và `streamlit`.
+`.env` không bắt buộc — API key Gemini cấu hình trong app (Settings → AI Model).
 
 ---
 
-## 3️⃣ Chạy ứng dụng 
+## 3. Chạy
+
+Dev mode:
 
 ```bash
-source venv/bin/activate | streamlit run podcast_transcriber.py --server.maxUploadSize=1024
-```
-Chạy trực tiếp từ dòng lệnh với giới hạn 1GB
-
-Giao diện Streamlit sẽ mở trên trình duyệt.
-
-* Upload file podcast (mp3/m4a/wav/aac)
-* Chọn model (Local Whisper hoặc OpenAI API)
-* Click vào transcript để nhảy audio
-* Download transcript dưới dạng `.txt`, `.srt`, `.json`
-
----
-
-## 4️⃣ Tùy chọn cache & force rerun
-
-* App tự động lưu cache tại thư mục `.cache_transcripts` (cùng thư mục project)
-* Nếu file podcast đã được phân tích, app sẽ load từ cache → tiết kiệm thời gian
-* Nếu muốn chạy lại model, tick **Force rerun**
-
----
-
-## 5️⃣ Sử dụng file Apple Podcasts đã download
-
-Apple Podcasts lưu file cache audio tại:
-
-```
-/Library/Group Containers/243LU875E5.groups.com.apple.podcasts/Library/Cache
+cd tauri-podcast
+npm run tauri dev
 ```
 
-* Trên Finder: `Go` → `Go to Folder...` → nhập đường dẫn trên
-* Trong thư mục Cache, các file audio podcast thường có tên dạng hash (`.mp3`/`.m4a`)
-* Bạn có thể **copy file đó** vào project hoặc dùng trực tiếp khi upload vào app
+Build production:
 
-> ⚠️ Không thể load trực tiếp từ thư mục này trong HTML component nếu chưa copy file.
-> Nên copy file ra `/tmp` hoặc thư mục khác trước khi dùng trong Streamlit.
-
----
-
-## 6️⃣ Cấu trúc thư mục project
-
-```
-podcast_transcriber/
-│
-├─ podcast_transcriber.py
-├─ README.md
-├─ .cache_transcripts/        # cache transcript
-└─ venv/                      # virtual environment
+```bash
+npm run tauri build
 ```
 
 ---
 
-## 7️⃣ Lưu ý quan trọng
+## 4. Cấu hình chính trong Settings
 
-* Trên Mac, audio nhúng bằng **base64** để tránh lỗi `NotSupportedError` trong Streamlit component
-* Nếu dùng Local Whisper trên M1/M2/M4, app tự chọn `cpu/int8` để tránh lỗi float16 không hỗ trợ
+| Mục | Ý nghĩa |
+|---|---|
+| AI Backend | `gemini` hoặc `whisper` |
+| Gemini API Key | https://aistudio.google.com/app/apikey |
+| Gemini Model | vd `gemini-2.5-flash`, `gemini-3.5-flash` |
+| Whisper Model Size | `small` (~500MB) / `medium` (~1.5GB) |
+| Language | `ja` / `auto` |
+| **Chunk size (minutes)** | Audio dài hơn được cắt thành chunk (Gemini). Mặc định 10 phút |
+| Force re-transcribe | Bỏ qua cache |
+| Cache Directory | Mặc định `~/Library/Application Support/com.transcriberkun.app/cache/` |
 
 ---
 
-## 8️⃣ Tham khảo
+## 5. Audio dài → chunking
 
-* [Streamlit Components](https://docs.streamlit.io/library/components)
-* [OpenAI Whisper API](https://platform.openai.com/docs/guides/speech-to-text)
-* [Faster Whisper GitHub](https://github.com/guillaumekln/faster-whisper)
+Audio dài (>10 phút mặc định) được `ffmpeg` cắt thành chunk, upload tuần tự lên Gemini, rồi merge segment với offset thời gian tuyệt đối. Tránh lỗi JSON cắt cụt khi response quá dài.
 
+Nếu một chunk fail (rate limit, safety block, JSON vỡ), chunk khác vẫn ra kết quả; segment fail được salvage qua regex thay vì mất sạch.
+
+**Debug log**: mở panel "🐞 Debug log" dưới progress bar, hoặc tail file `<cache_dir>/transcriber_debug.log`.
+
+---
+
+## 6. Sử dụng file Apple Podcasts đã download
+
+Apple Podcasts cache audio tại:
+
+```
+~/Library/Group Containers/243LU875E5.groups.com.apple.podcasts/Library/Cache
+```
+
+Finder → Go → Go to Folder → dán đường dẫn. Copy file `.mp3`/`.m4a` ra thư mục khác rồi mở trong app.
+
+---
+
+## 7. Cấu trúc thư mục
+
+```
+apple_podcast_transcript/
+├─ tauri-podcast/
+│  ├─ python/            # transcriber.py, memo_generator.py, ...
+│  ├─ src/               # frontend (HTML/CSS/JS)
+│  ├─ src-tauri/         # Rust backend
+│  ├─ setup.sh
+│  ├─ requirements.txt
+│  └─ package.json
+├─ docs/
+└─ README.md
+```

@@ -23,13 +23,20 @@ Event types (one JSON per line, flushed immediately):
 import argparse
 import hashlib
 import json
+import math
 import os
 import platform
+import re
 import subprocess
 import sys
 import tempfile
+import time
+import traceback
 import wave
 from pathlib import Path
+
+# Mutable, set in main() so log() can write to cache_dir/transcriber_debug.log
+_LOG_FILE_PATH: str | None = None
 
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
@@ -52,6 +59,19 @@ def emit_result(segments: list, cached: bool = False):
 
 def emit_error(message: str):
     emit({"type": "error", "message": message})
+
+
+def emit_log(message: str):
+    """Emit a log event (forwarded to UI) AND write to debug file."""
+    ts = time.strftime("%H:%M:%S")
+    line = f"[{ts}] {message}"
+    emit({"type": "log", "message": line})
+    if _LOG_FILE_PATH:
+        try:
+            with open(_LOG_FILE_PATH, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        except Exception:
+            pass
 
 
 def _strip_markdown_fence(text: str) -> str:
@@ -101,6 +121,28 @@ def _normalize_segment(segment: dict) -> dict:
         raise ValueError(f"Gemini segment has invalid fields: {segment}") from e
 
     return {"start": start, "end": end, "text": text}
+
+
+def salvage_segments(raw: str) -> list:
+    """Recover well-formed segment objects from a malformed JSON array.
+    Used when an unescaped quote inside `text` breaks the full array, so we
+    don't lose the whole chunk."""
+    pattern = re.compile(
+        r'\{\s*"start"\s*:\s*([0-9.]+)\s*,'
+        r'\s*"end"\s*:\s*([0-9.]+)\s*,'
+        r'\s*"text"\s*:\s*"((?:\\.|[^"\\])*)"\s*\}'
+    )
+    out = []
+    for m in pattern.finditer(raw):
+        try:
+            out.append({
+                "start": float(m.group(1)),
+                "end": float(m.group(2)),
+                "text": bytes(m.group(3), "utf-8").decode("unicode_escape"),
+            })
+        except Exception:
+            continue
+    return out
 
 
 def parse_gemini_segments(response_text: str) -> list:
@@ -175,6 +217,45 @@ def get_audio_duration(file_path: str):
         return None
 
 
+def ffprobe_duration(file_path: str):
+    """Robust duration probe via ffprobe (works for mp3/m4a/aac/wav). Returns float or None."""
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", file_path],
+            capture_output=True, text=True, timeout=30,
+        )
+        return float(out.stdout.strip()) if out.returncode == 0 else None
+    except Exception:
+        return None
+
+
+def ffmpeg_split_audio(file_path: str, chunk_seconds: int, out_dir: str):
+    """Split audio into fixed-length chunks. Returns (chunks, errors).
+    chunks: list of (chunk_path, offset_seconds). errors: list of (index, stderr_tail)."""
+    duration = ffprobe_duration(file_path)
+    if not duration or duration <= chunk_seconds:
+        return [(file_path, 0.0)], []
+    chunks, errors = [], []
+    n = math.ceil(duration / chunk_seconds)
+    for i in range(n):
+        start = i * chunk_seconds
+        out_path = os.path.join(out_dir, f"chunk_{i:03d}.mp3")
+        # -ss AFTER -i = accurate seek (correct for VBR mp3)
+        cmd = [
+            "ffmpeg", "-y", "-i", file_path,
+            "-ss", str(start), "-t", str(chunk_seconds),
+            "-vn", "-ar", "16000", "-ac", "1",
+            "-c:a", "libmp3lame", "-q:a", "4", out_path,
+        ]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if r.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+            chunks.append((out_path, float(start)))
+        else:
+            errors.append((i, (r.stderr or "")[-400:]))
+    return chunks, errors
+
+
 def fmt_hms(seconds: float) -> str:
     h = int(seconds // 3600)
     m = int((seconds % 3600) // 60)
@@ -192,56 +273,127 @@ def srt_time(seconds: float) -> str:
 
 # ─── transcription modes ──────────────────────────────────────────────────────
 
-def transcribe_gemini(audio_path: str, language: str, api_key: str, gemini_model: str) -> list:
-    """Transcribe using Google Gemini API. Returns list of segment dicts."""
+def transcribe_gemini(audio_path: str, language: str, api_key: str,
+                      gemini_model: str, chunk_minutes: int = 10) -> list:
+    """Transcribe using Google Gemini API with audio chunking for long files."""
     import google.generativeai as genai
     genai.configure(api_key=api_key)
 
-    # Step 1/4: Upload
-    emit_progress(1, 4, "📤 Uploading file to Gemini...", percent=10)
-    audio_file = genai.upload_file(audio_path)
-    emit_progress(1, 4, "✅ Upload complete.", percent=30)
+    duration = ffprobe_duration(audio_path)
+    if duration:
+        emit_log(f"audio duration: {duration:.1f}s ({duration/60:.1f} min)")
+    else:
+        emit_log("WARNING: could not determine audio duration via ffprobe")
 
-    # Step 2/4: Transcribe
-    emit_progress(2, 4, "🤖 Sending transcription request to Gemini AI...", percent=35)
-    model = genai.GenerativeModel(
-        gemini_model,
-        generation_config={"response_mime_type": "application/json"},
-    )
+    chunk_seconds = max(60, chunk_minutes * 60)
+    chunk_dir = tempfile.mkdtemp(prefix="podcast_chunks_")
+    emit_log(f"splitting into chunks of {chunk_seconds}s in {chunk_dir}")
+    chunks, split_errors = ffmpeg_split_audio(audio_path, chunk_seconds, chunk_dir)
+    total = len(chunks)
+    emit_log(f"split done: {total} chunks created, {len(split_errors)} ffmpeg failures")
+    for i, err in split_errors:
+        emit_log(f"  ffmpeg fail chunk {i}: {err[:200]}")
+    for cp, off in chunks:
+        sz = os.path.getsize(cp) if os.path.exists(cp) else -1
+        emit_log(f"  chunk: {os.path.basename(cp)} offset={off}s size={sz}B")
+
     lang_hint = "Japanese" if language == "ja" else "auto-detect"
     prompt = f"""Transcribe this audio file to text.
-Return the result as a JSON array of segments with this exact format:
-[{{"start": 0.0, "end": 5.2, "text": "transcribed text"}}, ...]
+Return ONLY a JSON array of segments — no markdown, no prose.
+Each segment: {{"start": <seconds>, "end": <seconds>, "text": "..."}}.
 
 Important:
-- Each segment should be 5-15 seconds long
-- Include accurate timestamps in seconds
-- Return ONLY valid JSON
-- Do not include markdown fences, explanations, or trailing text
+- Each segment 5-15 seconds long.
+- Timestamps RELATIVE to the start of THIS audio file (which may be a chunk).
 - Language: {lang_hint}
 """
-    response = model.generate_content([prompt, audio_file])
-    emit_progress(2, 4, "✅ Transcription received.", percent=70)
+    generation_config = {
+        "response_mime_type": "application/json",
+        "response_schema": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "start": {"type": "number"},
+                    "end": {"type": "number"},
+                    "text": {"type": "string"},
+                },
+                "required": ["start", "end", "text"],
+            },
+        },
+    }
+    model = genai.GenerativeModel(gemini_model, generation_config=generation_config)
 
-    # Step 3/4: Parse
-    emit_progress(3, 4, "🔍 Parsing JSON result...", percent=75)
-    response_text = response.text.strip()
-    try:
-        segments = parse_gemini_segments(response_text)
-    except (json.JSONDecodeError, ValueError) as e:
-        raise ValueError(f"Failed to parse Gemini JSON response: {e}\nRaw: {response_text[:500]}")
+    all_segments: list = []
+    for idx, (chunk_path, offset) in enumerate(chunks, start=1):
+        base_pct = int(((idx - 1) / total) * 90) + 5
+        next_pct = int((idx / total) * 90) + 5
+        audio_file = None
+        try:
+            emit_log(f"[chunk {idx}/{total}] uploading offset={offset}s")
+            emit_progress(idx, total, f"📤 Upload chunk {idx}/{total}...", percent=base_pct)
+            t0 = time.time()
+            audio_file = genai.upload_file(chunk_path)
+            emit_log(f"[chunk {idx}] uploaded in {time.time()-t0:.1f}s name={audio_file.name}")
 
-    emit_progress(3, 4, "✅ JSON parsed successfully.", percent=85)
+            emit_progress(idx, total, f"🤖 Transcribing chunk {idx}/{total}...", percent=base_pct + 2)
+            t1 = time.time()
+            response = model.generate_content([prompt, audio_file])
+            emit_log(f"[chunk {idx}] generate_content in {time.time()-t1:.1f}s")
+            try:
+                fr = response.candidates[0].finish_reason
+                emit_log(f"[chunk {idx}] finish_reason={fr}")
+            except Exception:
+                pass
 
-    # Step 4/4: Cleanup
-    emit_progress(4, 4, "🧹 Cleaning up Gemini temp file...", percent=90)
-    try:
-        genai.delete_file(audio_file.name)
-    except Exception:
-        pass  # Non-fatal
+            try:
+                response_text = response.text.strip()
+            except Exception as e:
+                emit_log(f"[chunk {idx}] response.text unavailable: {e}")
+                continue
 
-    emit_progress(4, 4, "✅ Done!", percent=100)
-    return segments
+            try:
+                segs = parse_gemini_segments(response_text)
+            except (json.JSONDecodeError, ValueError) as e:
+                emit_log(f"[chunk {idx}] JSON parse failed ({e}); salvaging segments")
+                segs = salvage_segments(response_text)
+
+            if not segs:
+                emit_log(f"[chunk {idx}] NO SEGMENTS recovered. raw[:500]={response_text[:500]}")
+                continue
+
+            for s in segs:
+                all_segments.append({
+                    "start": float(s["start"]) + offset,
+                    "end": float(s["end"]) + offset,
+                    "text": s.get("text", ""),
+                })
+            emit_log(f"[chunk {idx}] +{len(segs)} segments (total={len(all_segments)})")
+        except Exception as e:
+            emit_log(f"[chunk {idx}] EXCEPTION {type(e).__name__}: {e}")
+            emit_log(traceback.format_exc())
+        finally:
+            if audio_file is not None:
+                try: genai.delete_file(audio_file.name)
+                except Exception: pass
+            if total > 1 and chunk_path != audio_path:
+                try: os.remove(chunk_path)
+                except Exception: pass
+            emit_progress(idx, total,
+                          f"✅ Chunk {idx}/{total} done ({len(all_segments)} segments)",
+                          percent=next_pct)
+
+    if total > 1:
+        try: os.rmdir(chunk_dir)
+        except Exception: pass
+
+    all_segments.sort(key=lambda s: s["start"])
+    emit_log(f"DONE. total segments={len(all_segments)}")
+    emit_progress(total, total, f"✅ Done! {len(all_segments)} segments", percent=100)
+
+    if not all_segments:
+        raise ValueError("No segments recovered from any chunk. See log events for details.")
+    return all_segments
 
 
 def transcribe_whisper(audio_path: str, language: str, model_size: str) -> list:
@@ -335,7 +487,19 @@ def main():
     parser.add_argument("--gemini-model", default="gemini-3.5-flash")
     parser.add_argument("--cache-dir", default=".cache_transcripts")
     parser.add_argument("--force-rerun", action="store_true")
+    parser.add_argument("--chunk-minutes", type=int, default=10)
     args = parser.parse_args()
+
+    # Set up debug log file
+    global _LOG_FILE_PATH
+    try:
+        os.makedirs(args.cache_dir, exist_ok=True)
+        _LOG_FILE_PATH = os.path.join(args.cache_dir, "transcriber_debug.log")
+        with open(_LOG_FILE_PATH, "a", encoding="utf-8") as f:
+            f.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} run started ===\n")
+        emit_log(f"debug log: {_LOG_FILE_PATH}")
+    except Exception as e:
+        emit({"type": "log", "message": f"could not init log file: {e}"})
 
     # ── Video → audio extraction ────────────────────────────────────────────
     source_path = args.file
@@ -371,7 +535,8 @@ def main():
             if not args.api_key:
                 emit_error("Gemini API key required. Set it in Settings.")
                 sys.exit(1)
-            segments = transcribe_gemini(audio_path, args.language, args.api_key, args.gemini_model)
+            segments = transcribe_gemini(audio_path, args.language, args.api_key,
+                                         args.gemini_model, chunk_minutes=args.chunk_minutes)
         else:
             segments = transcribe_whisper(audio_path, args.language, args.model_size)
 

@@ -42,9 +42,13 @@ pub struct AppSettings {
     pub language: String,          // "ja" | "auto"
     pub force_rerun: bool,
     pub cache_dir: String,         // empty = use app_data_dir/cache
+    #[serde(default = "default_chunk_minutes")]
+    pub chunk_minutes: u32,        // Gemini audio chunk size in minutes
     #[serde(default = "default_memo_prompt_template")]
     pub memo_prompt_template: String,
 }
+
+fn default_chunk_minutes() -> u32 { 10 }
 
 #[derive(Deserialize)]
 struct GeminiModelsResponse {
@@ -62,6 +66,7 @@ impl Default for AppSettings {
             language: "ja".to_string(),
             force_rerun: false,
             cache_dir: String::new(),
+            chunk_minutes: default_chunk_minutes(),
             memo_prompt_template: default_memo_prompt_template(),
         }
     }

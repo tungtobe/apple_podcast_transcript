@@ -1,7 +1,0 @@
-streamlit
-openai
-faster-whisper
-google-generativeai
-python-dotenv
-streamlit_javascript
-# ffmpeg required as system dependency: brew install ffmpeg (macOS) or apt install ffmpeg (Linux)
