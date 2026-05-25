@@ -46,7 +46,7 @@ impl JobRegistry {
     fn take_final(&self, job_id: &str) -> Option<serde_json::Value> {
         self.finals.lock().unwrap().remove(job_id)
     }
-    fn active_ids(&self) -> Vec<String> {
+    pub fn active_ids(&self) -> Vec<String> {
         self.jobs.lock().unwrap().keys().cloned().collect()
     }
 }

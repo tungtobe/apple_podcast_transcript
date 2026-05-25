@@ -1,5 +1,7 @@
-use tauri::AppHandle;
+use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
+
+use crate::commands::transcribe::JobRegistry;
 
 /// Open a native file picker filtered for audio and video formats.
 /// Returns the selected file path or null if cancelled.
@@ -81,23 +83,60 @@ pub async fn write_json_file(path: String, content: String) -> Result<(), String
         .map_err(|e| format!("Cannot write file '{path}': {e}"))
 }
 
-/// Clear all files in the cache directory.
+/// Clear all contents of the cache directory (transcripts, debug log, and any
+/// temp work left behind under `<cache_dir>/tmp/`). Also sweeps stray
+/// `podcast_chunks_*` directories left in the system temp dir by earlier
+/// versions of the app or by jobs that were force-killed.
+///
+/// Returns the number of top-level entries removed (files + dirs).
 #[tauri::command]
-pub async fn clear_cache(cache_dir: String) -> Result<u32, String> {
-    let dir = std::path::Path::new(&cache_dir);
-    if !dir.exists() {
-        return Ok(0);
+pub async fn clear_cache(
+    registry: State<'_, JobRegistry>,
+    cache_dir: String,
+) -> Result<u32, String> {
+    // Refuse if a transcription is in flight — wiping its temp chunks would
+    // crash the job. Caller should cancel it first.
+    if !registry.active_ids().is_empty() {
+        return Err(
+            "A transcription job is currently running. Cancel it before clearing the cache."
+                .to_string(),
+        );
     }
 
     let mut count = 0u32;
-    let entries = std::fs::read_dir(dir)
-        .map_err(|e| format!("Cannot read cache dir: {e}"))?;
 
-    for entry in entries.flatten() {
-        if entry.path().is_file() {
-            let _ = std::fs::remove_file(entry.path());
-            count += 1;
+    // 1) Recursively wipe cache_dir contents (keep the directory itself).
+    let dir = std::path::Path::new(&cache_dir);
+    if dir.exists() {
+        let entries = std::fs::read_dir(dir)
+            .map_err(|e| format!("Cannot read cache dir: {e}"))?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let removed = if path.is_dir() {
+                std::fs::remove_dir_all(&path).is_ok()
+            } else {
+                std::fs::remove_file(&path).is_ok()
+            };
+            if removed { count += 1; }
         }
     }
+
+    // 2) Sweep legacy `podcast_chunks_*` dirs in the system temp directory.
+    // These leak when the Python process is SIGKILL'd before its own cleanup.
+    let sys_tmp = std::env::temp_dir();
+    if let Ok(entries) = std::fs::read_dir(&sys_tmp) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if name.starts_with("podcast_chunks_") {
+                    if std::fs::remove_dir_all(&path).is_ok() {
+                        count += 1;
+                    }
+                }
+            }
+        }
+    }
+
     Ok(count)
 }

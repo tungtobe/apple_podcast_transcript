@@ -289,7 +289,8 @@ def srt_time(seconds: float) -> str:
 # ─── transcription modes ──────────────────────────────────────────────────────
 
 def transcribe_gemini(audio_path: str, language: str, api_key: str,
-                      gemini_model: str, chunk_minutes: int = 10) -> list:
+                      gemini_model: str, chunk_minutes: int = 10,
+                      tmp_root: str | None = None) -> list:
     """Transcribe using Google Gemini API with audio chunking for long files."""
     import google.generativeai as genai
     genai.configure(api_key=api_key)
@@ -301,7 +302,11 @@ def transcribe_gemini(audio_path: str, language: str, api_key: str,
         emit_log("WARNING: could not determine audio duration via ffprobe")
 
     chunk_seconds = max(60, chunk_minutes * 60)
-    chunk_dir = tempfile.mkdtemp(prefix="podcast_chunks_")
+    if tmp_root:
+        os.makedirs(tmp_root, exist_ok=True)
+        chunk_dir = tempfile.mkdtemp(prefix="podcast_chunks_", dir=tmp_root)
+    else:
+        chunk_dir = tempfile.mkdtemp(prefix="podcast_chunks_")
     emit_log(f"splitting into chunks of {chunk_seconds}s in {chunk_dir}")
     chunks, split_errors = ffmpeg_split_audio(audio_path, chunk_seconds, chunk_dir)
     total = len(chunks)
@@ -516,6 +521,10 @@ def main():
     except Exception as e:
         emit({"type": "log", "message": f"could not init log file: {e}"})
 
+    # All temp work lives under <cache_dir>/tmp/ so clear_cache wipes it.
+    tmp_root = os.path.join(args.cache_dir, "tmp")
+    os.makedirs(tmp_root, exist_ok=True)
+
     # ── Video → audio extraction ────────────────────────────────────────────
     source_path = args.file
     audio_path = source_path
@@ -523,7 +532,7 @@ def main():
 
     if is_video_file(source_path):
         emit_progress(0, 4, "🎬 Extracting audio from video...", percent=2)
-        tmp_audio = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+        tmp_audio = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3", dir=tmp_root)
         tmp_audio.close()
         tmp_audio_path = tmp_audio.name
         ok, err = ffmpeg_extract_audio(source_path, tmp_audio_path)
@@ -551,7 +560,8 @@ def main():
                 emit_error("Gemini API key required. Set it in Settings.")
                 sys.exit(1)
             segments = transcribe_gemini(audio_path, args.language, args.api_key,
-                                         args.gemini_model, chunk_minutes=args.chunk_minutes)
+                                         args.gemini_model, chunk_minutes=args.chunk_minutes,
+                                         tmp_root=tmp_root)
         else:
             segments = transcribe_whisper(audio_path, args.language, args.model_size)
 

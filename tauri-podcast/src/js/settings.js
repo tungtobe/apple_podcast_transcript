@@ -150,12 +150,20 @@ async function openCacheFolder() {
 
 async function clearCache() {
   const dir = document.getElementById('cache-dir').value;
-  if (!confirm(`Clear all cached transcripts in:\n${dir}\n\nThis cannot be undone.`)) return;
+  if (!confirm(
+    `Clear cache in:\n${dir}\n\n` +
+    `This wipes:\n` +
+    `  • transcripts (.json/.txt/.srt)\n` +
+    `  • debug log\n` +
+    `  • leftover chunk/audio temp files\n\n` +
+    `Original audio/video files are NOT touched.\n` +
+    `Cannot be undone.`
+  )) return;
   try {
     const count = await invoke('clear_cache', { cacheDir: dir });
-    showBanner(`✅ Cleared ${count} cached files.`, 'success');
+    showBanner(`✅ Removed ${count} item(s).`, 'success');
   } catch (err) {
-    showBanner(`Failed to clear cache: ${err}`, 'error');
+    showBanner(`${err}`, 'error');
   }
 }
 
