@@ -20,6 +20,8 @@ pub fn run() {
             commands::setup::install_deps,
             commands::transcribe::transcribe,
             commands::transcribe::cancel_transcribe,
+            commands::transcribe::list_active_jobs,
+            commands::transcribe::poll_job_result,
             commands::settings::get_settings,
             commands::settings::save_settings,
             commands::settings::get_cache_dir,

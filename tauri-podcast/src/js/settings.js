@@ -5,18 +5,42 @@ const { invoke } = window.__TAURI__.core;
 // ── State ──────────────────────────────────────────────────────────────────
 let currentSettings = null;
 
-// ── Tab navigation ─────────────────────────────────────────────────────────
-function switchTab(name) {
-  document.querySelectorAll('.tab-panel').forEach(p => p.setAttribute('hidden', ''));
-  document.querySelectorAll('.settings-nav button').forEach(b => b.classList.remove('active'));
-
-  const panel = document.getElementById(`tab-${name}`);
-  const btn   = document.getElementById(`nav-${name}`);
-  if (panel) panel.removeAttribute('hidden');
-  if (btn)   btn.classList.add('active');
+// ── Sidebar scroll-spy ─────────────────────────────────────────────────────
+function setActiveNav(id) {
+  document.querySelectorAll('.settings-nav .nav-link').forEach(a => {
+    a.classList.toggle('active', a.dataset.target === id);
+  });
 }
 
-window.switchTab = switchTab;
+function initScrollSpy() {
+  const panel = document.querySelector('.settings-panel');
+  const sections = Array.from(document.querySelectorAll('.settings-panel .tab-panel'));
+  if (!panel || !sections.length) return;
+
+  // Anchor clicks: smooth-scroll within the panel container instead of the page.
+  document.querySelectorAll('.settings-nav .nav-link').forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const target = document.getElementById(link.dataset.target);
+      if (target) {
+        panel.scrollTo({ top: target.offsetTop - 8, behavior: 'smooth' });
+        setActiveNav(link.dataset.target);
+      }
+    });
+  });
+
+  // Highlight nav based on which section is closest to top.
+  const onScroll = () => {
+    const top = panel.scrollTop;
+    let current = sections[0].id;
+    for (const s of sections) {
+      if (s.offsetTop - 40 <= top) current = s.id;
+    }
+    setActiveNav(current);
+  };
+  panel.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+}
 
 // ── Load settings ──────────────────────────────────────────────────────────
 async function loadSettings() {
@@ -170,5 +194,5 @@ window.loadGeminiModels = loadGeminiModels;
 // ── Init ───────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
   loadSettings();
-  switchTab('ai');
+  initScrollSpy();
 });

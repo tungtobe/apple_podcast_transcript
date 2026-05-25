@@ -47,7 +47,71 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   initDropZone();
+  await tryResumeActiveJob();
 });
+
+// ── Resume in-flight job after page navigation ─────────────────────────────
+const JOB_STATE_KEY = 'transcribeJobState';
+
+function persistJobState(extra = {}) {
+  if (!jobId) {
+    sessionStorage.removeItem(JOB_STATE_KEY);
+    return;
+  }
+  const state = {
+    jobId,
+    filePath: currentFile,
+    message: document.getElementById('progress-message')?.textContent || '',
+    percent: parseFloat(document.getElementById('progress-bar-inner')?.style.width || '0'),
+    ...extra,
+  };
+  sessionStorage.setItem(JOB_STATE_KEY, JSON.stringify(state));
+}
+
+function clearJobState() {
+  sessionStorage.removeItem(JOB_STATE_KEY);
+}
+
+async function tryResumeActiveJob() {
+  let saved;
+  try { saved = JSON.parse(sessionStorage.getItem(JOB_STATE_KEY) || 'null'); }
+  catch { saved = null; }
+  if (!saved || !saved.jobId) return;
+
+  // Verify the job is still tracked by Rust (running OR has buffered final).
+  let activeIds = [];
+  try { activeIds = await invoke('list_active_jobs'); } catch { activeIds = []; }
+  const isActive = activeIds.includes(saved.jobId);
+  const buffered = await invoke('poll_job_result', { jobId: saved.jobId }).catch(() => null);
+  if (!isActive && !buffered) {
+    clearJobState();
+    return;
+  }
+
+  // Restore minimal UI: file info + progress bar
+  jobId       = saved.jobId;
+  currentFile = saved.filePath;
+  if (currentFile) {
+    document.getElementById('current-file-name').textContent = currentFile.split('/').pop();
+    document.getElementById('drop-zone').setAttribute('hidden', '');
+    document.getElementById('file-info').removeAttribute('hidden');
+  }
+  showProgress(true, saved.message || '⏳ Resuming...', saved.percent || 0);
+  showAlert('🔄 Resumed in-flight transcription.', 'info');
+
+  // Subscribe to future events before applying any buffered terminal event,
+  // so we don't miss a progress emitted right after poll.
+  if (unlistenFn) { unlistenFn(); unlistenFn = null; }
+  unlistenFn = await window.__TAURI__.event.listen(
+    `transcribe:${saved.jobId}`,
+    handleTranscribeEvent,
+  );
+
+  if (buffered) {
+    // Apply the missed terminal event as if it had just arrived.
+    handleTranscribeEvent({ payload: buffered });
+  }
+}
 
 // ── Drop zone ──────────────────────────────────────────────────────────────
 function initDropZone() {
@@ -109,6 +173,7 @@ async function startTranscription() {
   showAlert(null);
   const debugEl = document.getElementById('debug-log');
   if (debugEl) debugEl.textContent = '';
+  persistJobState();
 
   // Subscribe to events BEFORE invoking
   if (unlistenFn) { unlistenFn(); unlistenFn = null; }
@@ -144,6 +209,7 @@ function handleTranscribeEvent({ payload }) {
 
   if (p.type === 'progress') {
     showProgress(true, p.message, p.percent ?? 0);
+    persistJobState();
 
   } else if (p.type === 'log') {
     appendDebugLog(p.message);
@@ -151,6 +217,7 @@ function handleTranscribeEvent({ payload }) {
   } else if (p.type === 'result') {
     if (unlistenFn) { unlistenFn(); unlistenFn = null; }
     showProgress(false);
+    clearJobState();
     const segs = Array.isArray(p.segments) ? [...p.segments] : [];
     segs.sort((a, b) => (parseFloat(a.start) || 0) - (parseFloat(b.start) || 0));
     currentSegments = segs;
@@ -160,11 +227,13 @@ function handleTranscribeEvent({ payload }) {
   } else if (p.type === 'cancelled') {
     if (unlistenFn) { unlistenFn(); unlistenFn = null; }
     showProgress(false);
+    clearJobState();
     showAlert('⛔ Transcription cancelled.', 'warn');
 
   } else if (p.type === 'error') {
     if (unlistenFn) { unlistenFn(); unlistenFn = null; }
     showProgress(false);
+    clearJobState();
     showAlert(`❌ ${p.message}`, 'error');
   }
 }

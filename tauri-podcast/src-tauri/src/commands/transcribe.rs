@@ -24,10 +24,13 @@ pub struct TranscribeSettings {
 fn default_chunk_minutes() -> u32 { 10 }
 
 /// Registry of running transcription jobs, keyed by job_id.
-/// Cancellation kills the underlying Python child process.
+/// - `jobs`: child handle for cancellation; entry removed when job ends.
+/// - `finals`: terminal event (result/error/cancelled) buffered so a UI that
+///   navigated away during the job can poll once it returns.
 #[derive(Default)]
 pub struct JobRegistry {
     jobs: Mutex<HashMap<String, Arc<AsyncMutex<Option<Child>>>>>,
+    finals: Mutex<HashMap<String, serde_json::Value>>,
 }
 
 impl JobRegistry {
@@ -36,6 +39,15 @@ impl JobRegistry {
     }
     fn take(&self, job_id: &str) -> Option<Arc<AsyncMutex<Option<Child>>>> {
         self.jobs.lock().unwrap().remove(job_id)
+    }
+    fn store_final(&self, job_id: &str, value: serde_json::Value) {
+        self.finals.lock().unwrap().insert(job_id.to_string(), value);
+    }
+    fn take_final(&self, job_id: &str) -> Option<serde_json::Value> {
+        self.finals.lock().unwrap().remove(job_id)
+    }
+    fn active_ids(&self) -> Vec<String> {
+        self.jobs.lock().unwrap().keys().cloned().collect()
     }
 }
 
@@ -132,6 +144,9 @@ pub async fn transcribe(
                                 .and_then(|t| t.as_str())
                                 .map(|t| t == "result" || t == "error")
                                 .unwrap_or(false);
+                            if is_final {
+                                registry.store_final(&job_id, val.clone());
+                            }
                             app.emit(&event_name, &val).ok();
                             if is_final {
                                 break;
@@ -167,21 +182,19 @@ pub async fn transcribe(
                             cancelled = true;
                         }
                         if cancelled {
-                            app.emit(
-                                &event_name,
-                                serde_json::json!({"type":"cancelled","message":"Transcription cancelled."}),
-                            ).ok();
+                            let payload = serde_json::json!({"type":"cancelled","message":"Transcription cancelled."});
+                            registry.store_final(&job_id, payload.clone());
+                            app.emit(&event_name, &payload).ok();
                         } else {
-                            app.emit(
-                                &event_name,
-                                serde_json::json!({
-                                    "type": "error",
-                                    "message": format!(
-                                        "Transcription process exited with code {}",
-                                        status.code().unwrap_or(-1)
-                                    )
-                                }),
-                            ).ok();
+                            let payload = serde_json::json!({
+                                "type": "error",
+                                "message": format!(
+                                    "Transcription process exited with code {}",
+                                    status.code().unwrap_or(-1)
+                                )
+                            });
+                            registry.store_final(&job_id, payload.clone());
+                            app.emit(&event_name, &payload).ok();
                         }
                     }
                 }
@@ -199,6 +212,24 @@ pub async fn transcribe(
     registry.take(&job_id);
 
     Ok(())
+}
+
+/// Return the list of job_ids currently running. Used by the UI to resume
+/// the progress display after a page navigation.
+#[tauri::command]
+pub fn list_active_jobs(registry: State<'_, JobRegistry>) -> Vec<String> {
+    registry.active_ids()
+}
+
+/// Pop the buffered terminal event (result/error/cancelled) for a job, if any.
+/// Used by the UI after re-attaching its listener to catch events emitted
+/// while no listener was subscribed.
+#[tauri::command]
+pub fn poll_job_result(
+    registry: State<'_, JobRegistry>,
+    job_id: String,
+) -> Option<serde_json::Value> {
+    registry.take_final(&job_id)
 }
 
 /// Cancel an in-flight transcription job by killing its Python child process.

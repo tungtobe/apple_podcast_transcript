@@ -19,19 +19,19 @@
   <div id="settings-banner" class="alert" hidden style="margin-top:10px"></div>
 
   <div class="settings-layout" style="margin-top:16px">
-    <!-- Sidebar nav -->
+    <!-- Sidebar nav (sticky, anchors to sections) -->
     <nav class="settings-nav">
-      <button id="nav-ai"            onclick="switchTab('ai')">🤖 AI Model</button>
-      <button id="nav-transcription" onclick="switchTab('transcription')">🎙 Transcription</button>
-      <button id="nav-memo"          onclick="switchTab('memo')">📝 Memo</button>
-      <button id="nav-storage"       onclick="switchTab('storage')">💾 Storage</button>
+      <a href="#section-ai"            class="nav-link" data-target="section-ai">🤖 AI Model</a>
+      <a href="#section-transcription" class="nav-link" data-target="section-transcription">🎙 Transcription</a>
+      <a href="#section-memo"          class="nav-link" data-target="section-memo">📝 Memo</a>
+      <a href="#section-storage"       class="nav-link" data-target="section-storage">💾 Storage</a>
     </nav>
 
     <!-- Panels -->
     <div class="settings-panel">
 
-      <!-- ── AI Model tab ── -->
-      <div id="tab-ai" class="tab-panel card">
+      <!-- ── AI Model ── -->
+      <div id="section-ai" class="tab-panel card">
         <div class="settings-group">
           <h3>AI Backend</h3>
 
@@ -84,8 +84,8 @@
         </div>
       </div>
 
-      <!-- ── Transcription tab ── -->
-      <div id="tab-transcription" class="tab-panel card" hidden>
+      <!-- ── Transcription ── -->
+      <div id="section-transcription" class="tab-panel card">
         <div class="settings-group">
           <h3>Whisper Settings</h3>
 
@@ -136,8 +136,8 @@
         </div>
       </div>
 
-      <!-- ── Memo tab ── -->
-      <div id="tab-memo" class="tab-panel card" hidden>
+      <!-- ── Memo ── -->
+      <div id="section-memo" class="tab-panel card">
         <div class="settings-group">
           <h3>Meeting Memo Prompt</h3>
 
@@ -153,8 +153,8 @@
         </div>
       </div>
 
-      <!-- ── Storage tab ── -->
-      <div id="tab-storage" class="tab-panel card" hidden>
+      <!-- ── Storage ── -->
+      <div id="section-storage" class="tab-panel card">
         <div class="settings-group">
           <h3>Transcript Cache</h3>
 

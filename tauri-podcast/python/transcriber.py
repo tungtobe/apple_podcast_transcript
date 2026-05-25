@@ -232,22 +232,37 @@ def ffprobe_duration(file_path: str):
 
 def ffmpeg_split_audio(file_path: str, chunk_seconds: int, out_dir: str):
     """Split audio into fixed-length chunks. Returns (chunks, errors).
-    chunks: list of (chunk_path, offset_seconds). errors: list of (index, stderr_tail)."""
+    chunks: list of (chunk_path, offset_seconds). errors: list of (index, stderr_tail).
+
+    For mp3 inputs we use `-c copy` to avoid LAME encoder padding (~25-50ms per chunk)
+    that otherwise shifts every Gemini timestamp earlier than the true audio position.
+    """
     duration = ffprobe_duration(file_path)
     if not duration or duration <= chunk_seconds:
         return [(file_path, 0.0)], []
     chunks, errors = [], []
     n = math.ceil(duration / chunk_seconds)
+    is_mp3 = file_path.lower().endswith(".mp3")
+    out_ext = "mp3" if is_mp3 else "m4a"
     for i in range(n):
         start = i * chunk_seconds
-        out_path = os.path.join(out_dir, f"chunk_{i:03d}.mp3")
-        # -ss AFTER -i = accurate seek (correct for VBR mp3)
-        cmd = [
-            "ffmpeg", "-y", "-i", file_path,
-            "-ss", str(start), "-t", str(chunk_seconds),
-            "-vn", "-ar", "16000", "-ac", "1",
-            "-c:a", "libmp3lame", "-q:a", "4", out_path,
-        ]
+        out_path = os.path.join(out_dir, f"chunk_{i:03d}.{out_ext}")
+        if is_mp3:
+            # Stream copy: no re-encode → no added encoder delay; frame-accurate enough
+            # for our purposes (mp3 frame ≈ 26ms at 44.1kHz).
+            cmd = [
+                "ffmpeg", "-y", "-ss", str(start), "-i", file_path,
+                "-t", str(chunk_seconds), "-vn", "-c:a", "copy", out_path,
+            ]
+        else:
+            # Non-mp3 input — re-encode is unavoidable. Use AAC in m4a (smaller
+            # encoder delay than LAME and Gemini accepts it).
+            cmd = [
+                "ffmpeg", "-y", "-i", file_path,
+                "-ss", str(start), "-t", str(chunk_seconds),
+                "-vn", "-ar", "16000", "-ac", "1",
+                "-c:a", "aac", "-b:a", "64k", out_path,
+            ]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         if r.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 0:
             chunks.append((out_path, float(start)))
