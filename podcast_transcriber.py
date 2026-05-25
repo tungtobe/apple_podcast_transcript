@@ -1,5 +1,5 @@
 import streamlit as st
-import os, tempfile, json, math, hashlib, platform, base64
+import os, tempfile, json, math, hashlib, platform, base64, wave, struct, subprocess
 from pathlib import Path
 import google.generativeai as genai
 import streamlit.components.v1 as components
@@ -36,12 +36,61 @@ else:
     if mode == "Gemini API":
         st.warning("⚠️ GEMINI_API_KEY chưa được set trong file .env")
 
+# --- Video formats supported ---
+VIDEO_FORMATS = ["mp4", "mov", "avi", "mkv", "webm", "flv", "wmv", "m2ts", "ts"]
+AUDIO_FORMATS = ["mp3", "m4a", "wav", "aac"]
+
+def is_video_file(filename: str) -> bool:
+    return Path(filename).suffix.lstrip(".").lower() in VIDEO_FORMATS
+
+def ffmpeg_extract_audio(video_path: str, out_path: str) -> tuple[bool, str]:
+    """Extract audio track from video using ffmpeg. Returns (success, error_msg)."""
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", video_path,
+        "-vn",                  # no video
+        "-ar", "16000",         # 16kHz — optimal for Whisper
+        "-ac", "1",             # mono
+        "-c:a", "libmp3lame",
+        "-q:a", "4",
+        out_path
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            return False, result.stderr[-1000:]  # last 1000 chars of stderr
+        return True, ""
+    except FileNotFoundError:
+        return False, "ffmpeg không tìm thấy. Hãy cài: brew install ffmpeg"
+    except subprocess.TimeoutExpired:
+        return False, "ffmpeg timeout sau 5 phút"
+
 # --- File upload ---
-uploaded_file = st.file_uploader("📂 Chọn file podcast (mp3, m4a...)", type=["mp3","m4a","wav","aac"])
+uploaded_file = st.file_uploader(
+    "📂 Chọn file podcast hoặc video (mp3, m4a, wav, aac, mp4, mov, avi, mkv...)",
+    type=AUDIO_FORMATS + VIDEO_FORMATS
+)
 if uploaded_file is not None:
-    temp_audio = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-    temp_audio.write(uploaded_file.read())
-    temp_audio.flush()
+    file_ext = Path(uploaded_file.name).suffix.lower()  # e.g. ".mp4"
+
+    # Save uploaded file to a temp file with its original extension
+    temp_source = tempfile.NamedTemporaryFile(delete=False, suffix=file_ext)
+    temp_source.write(uploaded_file.read())
+    temp_source.flush()
+
+    # Convert video → audio if needed
+    if is_video_file(uploaded_file.name):
+        with st.spinner(f"🎬 Đang extract audio từ video `{uploaded_file.name}`..."):
+            temp_audio = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+            temp_audio.close()  # close so ffmpeg can write to it
+            ok, err = ffmpeg_extract_audio(temp_source.name, temp_audio.name)
+        if not ok:
+            st.error(f"❌ Lỗi convert video: {err}")
+            st.stop()
+        st.success(f"✅ Extract audio thành công từ `{uploaded_file.name}`")
+    else:
+        # Audio file — rename temp file to .mp3 for consistent handling downstream
+        temp_audio = temp_source
 
     # --- Cache setup ---
     CACHE_DIR = ".cache_transcripts"
@@ -72,95 +121,155 @@ if uploaded_file is not None:
         st.info("📌 Sử dụng transcript đã cache, không chạy model lại.")
     else:
         st.info("⚡ Chạy nhận dạng mới...")
-        with st.spinner("Đang nhận dạng, vui lòng chờ..."):
-            result = {"segments": []}
-            if mode == "Gemini API":
-                if not gemini_available:
-                    st.error("⚠️ GEMINI_API_KEY không tồn tại. Vui lòng thêm vào file .env")
-                else:
-                    # Upload audio file to Gemini
-                    audio_file = genai.upload_file(temp_audio.name)
-                    
-                    # Use Gemini for transcription
-                    model = genai.GenerativeModel(gemini_model)
-                    prompt = f"""Transcribe this audio file to text. 
-                    Return the result as a JSON array of segments with this exact format:
-                    [{{"start": 0.0, "end": 5.2, "text": "transcribed text"}}, ...]
-                    
-                    Important:
-                    - Each segment should be 5-15 seconds long
-                    - Include accurate timestamps in seconds
-                    - Return ONLY the JSON array, no other text
-                    - Language: {"Japanese" if language == "ja" else "auto-detect"}
-                    """
-                    
-                    response = model.generate_content([prompt, audio_file])
-                    
-                    # Parse response
-                    try:
-                        response_text = response.text.strip()
-                        # Remove markdown code blocks if present
-                        if response_text.startswith("```"):
-                            response_text = response_text.split("```")[1]
-                            if response_text.startswith("json"):
-                                response_text = response_text[4:]
-                        response_text = response_text.strip()
-                        
-                        segments = json.loads(response_text)
-                        result["segments"] = segments
-                    except json.JSONDecodeError:
-                        st.error("❌ Lỗi parse JSON từ Gemini response")
-                        st.text(response.text)
-                    
-                    # Clean up uploaded file
-                    genai.delete_file(audio_file.name)
+        result = {"segments": []}
+
+        # --- Helper: get audio duration (seconds) ---
+        def get_audio_duration(file_path):
+            """Try to get duration via wave (WAV only), else fallback to None."""
+            try:
+                with wave.open(file_path, 'r') as wf:
+                    frames = wf.getnframes()
+                    rate = wf.getframerate()
+                    return frames / rate
+            except Exception:
+                return None
+
+        if mode == "Gemini API":
+            if not gemini_available:
+                st.error("⚠️ GEMINI_API_KEY không tồn tại. Vui lòng thêm vào file .env")
             else:
-                if not faster_whisper_installed:
-                    st.error("⚠️ faster-whisper chưa cài đặt. Chạy: pip install faster-whisper")
+                # --- Gemini: 4 steps progress ---
+                progress_bar = st.progress(0, text="⏳ Bắt đầu xử lý...")
+                status_text = st.empty()
+
+                # Step 1: Upload
+                status_text.markdown("📤 **Bước 1/4:** Đang upload file lên Gemini...")
+                progress_bar.progress(10, text="📤 Đang upload file lên Gemini...")
+                audio_file = genai.upload_file(temp_audio.name)
+                progress_bar.progress(30, text="✅ Upload xong. Đang gửi yêu cầu nhận dạng...")
+
+                # Step 2: Transcribe
+                status_text.markdown("🤖 **Bước 2/4:** Đang gửi yêu cầu nhận dạng tới Gemini AI...")
+                model = genai.GenerativeModel(gemini_model)
+                prompt = f"""Transcribe this audio file to text. 
+                Return the result as a JSON array of segments with this exact format:
+                [{{"start": 0.0, "end": 5.2, "text": "transcribed text"}}, ...]
+                
+                Important:
+                - Each segment should be 5-15 seconds long
+                - Include accurate timestamps in seconds
+                - Return ONLY the JSON array, no other text
+                - Language: {"Japanese" if language == "ja" else "auto-detect"}
+                """
+                response = model.generate_content([prompt, audio_file])
+                progress_bar.progress(70, text="✅ Nhận dạng xong. Đang xử lý kết quả...")
+
+                # Step 3: Parse
+                status_text.markdown("🔍 **Bước 3/4:** Đang phân tích kết quả JSON...")
+                try:
+                    response_text = response.text.strip()
+                    if response_text.startswith("```"):
+                        response_text = response_text.split("```")[1]
+                        if response_text.startswith("json"):
+                            response_text = response_text[4:]
+                    response_text = response_text.strip()
+                    segments = json.loads(response_text)
+                    result["segments"] = segments
+                    progress_bar.progress(85, text="✅ Phân tích JSON thành công!")
+                except json.JSONDecodeError:
+                    st.error("❌ Lỗi parse JSON từ Gemini response")
+                    st.text(response.text)
+
+                # Step 4: Cleanup
+                status_text.markdown("🧹 **Bước 4/4:** Đang dọn dẹp file tạm trên Gemini...")
+                genai.delete_file(audio_file.name)
+                progress_bar.progress(100, text="✅ Hoàn tất nhận dạng Gemini!")
+                status_text.empty()
+
+        else:
+            if not faster_whisper_installed:
+                st.error("⚠️ faster-whisper chưa cài đặt. Chạy: pip install faster-whisper")
+            else:
+                if "arm" in platform.machine().lower() or "mac" in platform.platform().lower():
+                    device = "cpu"
+                    compute_type = "int8"
                 else:
-                    if "arm" in platform.machine().lower() or "mac" in platform.platform().lower():
-                        device = "cpu"
-                        compute_type = "int8"
+                    device = "auto"
+                    compute_type = "float16"
+
+                # --- Whisper: segment-level progress ---
+                progress_bar = st.progress(0, text="⏳ Đang tải model Whisper...")
+                status_text = st.empty()
+
+                status_text.markdown(f"🔧 **Đang tải model Whisper `{model_size}`...**")
+                model = WhisperModel(model_size, device=device, compute_type=compute_type)
+                progress_bar.progress(5, text="✅ Model đã sẵn sàng. Bắt đầu nhận dạng...")
+
+                # Try to estimate total audio duration for progress
+                audio_duration = get_audio_duration(temp_audio.name)
+
+                status_text.markdown("🎤 **Đang nhận dạng giọng nói...** (tiến trình cập nhật theo từng đoạn)")
+                segments_gen, _ = model.transcribe(temp_audio.name, language=language)
+
+                for seg in segments_gen:
+                    result["segments"].append({
+                        "start": seg.start,
+                        "end": seg.end,
+                        "text": seg.text.strip()
+                    })
+                    n_segs = len(result["segments"])
+                    elapsed_str = f"{int(seg.end // 3600):02d}:{int((seg.end % 3600) // 60):02d}:{int(seg.end % 60):02d}"
+                    # Update progress based on timestamp
+                    if audio_duration and audio_duration > 0:
+                        pct = min(int((seg.end / audio_duration) * 90) + 5, 95)
+                        pct_display = min(int((seg.end / audio_duration) * 100), 100)
+                        total_str = f"{int(audio_duration // 3600):02d}:{int((audio_duration % 3600) // 60):02d}:{int(audio_duration % 60):02d}"
+                        label = f"🎤 [{elapsed_str} / {total_str}] ({pct_display}%) | {n_segs} đoạn"
                     else:
-                        device = "auto"
-                        compute_type = "float16"
-                    model = WhisperModel(model_size, device=device, compute_type=compute_type)
-                    segments, _ = model.transcribe(temp_audio.name, language=language)
-                    for seg in segments:
-                        result["segments"].append({
-                            "start": seg.start,
-                            "end": seg.end,
-                            "text": seg.text.strip()
-                        })
+                        pct = min(n_segs * 2 + 5, 95)
+                        label = f"🎤 [{elapsed_str}] | {n_segs} đoạn"
+                    progress_bar.progress(pct, text=label)
+                    short_text = seg.text.strip()
+                    display_text = f"{short_text[:80]}..." if len(short_text) > 80 else short_text
+                    status_text.markdown(f"📝 **Đoạn {n_segs}:** `[{elapsed_str}]` {display_text}")
 
-            # --- Save cache ---
-            with open(cache_json, "w", encoding="utf-8") as f:
-                json.dump(result, f, ensure_ascii=False, indent=2)
+                progress_bar.progress(100, text=f"✅ Hoàn tất! {len(result['segments'])} đoạn được nhận dạng.")
+                status_text.empty()
 
-            # TXT cache
-            txt_content = "\n".join([f"[{math.floor(s['start'])}s - {math.floor(s['end'])}s] {s['text']}" for s in result["segments"]])
-            with open(cache_txt, "w", encoding="utf-8") as f:
-                f.write(txt_content)
+        # --- Save cache ---
+        with open(cache_json, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
 
-            # SRT cache
-            def srt_time_format(seconds):
-                h = int(seconds // 3600)
-                m = int((seconds % 3600) // 60)
-                s = int(seconds % 60)
-                ms = int((seconds - int(seconds)) * 1000)
-                return f"{h:02}:{m:02}:{s:02},{ms:03}"
+        # TXT cache
+        def fmt_hms(seconds):
+            h = int(seconds // 3600)
+            m = int((seconds % 3600) // 60)
+            s = int(seconds % 60)
+            return f"{h:02}:{m:02}:{s:02}"
 
-            srt_lines = []
-            for i, s in enumerate(result["segments"], 1):
-                srt_lines.append(str(i))
-                srt_lines.append(f"{srt_time_format(s['start'])} --> {srt_time_format(s['end'])}")
-                srt_lines.append(s["text"])
-                srt_lines.append("")
-            srt_content = "\n".join(srt_lines)
-            with open(cache_srt, "w", encoding="utf-8") as f:
-                f.write(srt_content)
+        txt_content = "\n".join([f"[{fmt_hms(s['start'])} - {fmt_hms(s['end'])}] {s['text']}" for s in result["segments"]])
+        with open(cache_txt, "w", encoding="utf-8") as f:
+            f.write(txt_content)
 
-            st.success("✅ Nhận dạng hoàn tất!")
+        # SRT cache
+        def srt_time_format(seconds):
+            h = int(seconds // 3600)
+            m = int((seconds % 3600) // 60)
+            s = int(seconds % 60)
+            ms = int((seconds - int(seconds)) * 1000)
+            return f"{h:02}:{m:02}:{s:02},{ms:03}"
+
+        srt_lines = []
+        for i, s in enumerate(result["segments"], 1):
+            srt_lines.append(str(i))
+            srt_lines.append(f"{srt_time_format(s['start'])} --> {srt_time_format(s['end'])}")
+            srt_lines.append(s["text"])
+            srt_lines.append("")
+        srt_content = "\n".join(srt_lines)
+        with open(cache_srt, "w", encoding="utf-8") as f:
+            f.write(srt_content)
+
+        st.success("✅ Nhận dạng hoàn tất!")
 
     # --- Convert audio to base64 ---
     def get_audio_base64(file_path):
