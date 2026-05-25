@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Setup — Transcriber-kun</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="setup-page">
+  <div class="setup-card">
+    <h1>🎧 Transcriber-kun</h1>
+    <p class="subtitle">Let's make sure everything is ready before you start.</p>
+
+    <div id="error-banner" class="alert alert-error" hidden></div>
+
+    <ul class="check-list">
+      <!-- Python check -->
+      <li class="check-item">
+        <span class="check-icon" id="icon-python">⏳</span>
+        <div class="check-content">
+          <div class="check-title">Python 3.10+</div>
+          <div class="check-detail" id="detail-python">Checking...</div>
+        </div>
+      </li>
+
+      <!-- Python packages check -->
+      <li class="check-item">
+        <span class="check-icon" id="icon-pkgs">⏳</span>
+        <div class="check-content">
+          <div class="check-title">Python Packages</div>
+          <div class="check-detail" id="detail-pkgs">
+            faster-whisper, google-generativeai, python-dotenv
+          </div>
+        </div>
+      </li>
+
+      <!-- ffmpeg check -->
+      <li class="check-item">
+        <span class="check-icon" id="icon-ffmpeg">⏳</span>
+        <div class="check-content">
+          <div class="check-title">ffmpeg <span style="font-size:11px;color:var(--text-secondary)">(for video files)</span></div>
+          <div class="check-detail" id="detail-ffmpeg">Checking...</div>
+        </div>
+      </li>
+    </ul>
+
+    <!-- pip install log -->
+    <div id="install-log-wrap" hidden>
+      <pre id="install-log"></pre>
+    </div>
+
+    <!-- Actions -->
+    <div class="setup-actions">
+      <button id="btn-install"
+              class="btn-primary"
+              hidden
+              onclick="installPackages()">
+        📦 Install Missing Packages
+      </button>
+
+      <button id="btn-recheck"
+              class="btn-secondary"
+              disabled
+              onclick="recheckSetup()">
+        🔄 Check Again
+      </button>
+
+      <button id="btn-continue"
+              class="btn-primary"
+              disabled
+              onclick="continueToApp()">
+        Continue →
+      </button>
+    </div>
+
+    <p style="margin-top:20px;font-size:11px;color:var(--text-secondary)">
+      Packages are installed into an isolated environment at<br>
+      <code>~/Library/Application Support/com.transcriberkun.app/venv/</code>
+    </p>
+  </div>
+</div>
+
+<script src="js/router.js"></script>
+<script src="js/setup.js"></script>
+</body>
+</html>

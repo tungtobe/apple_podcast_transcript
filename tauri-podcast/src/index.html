@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Transcriber-kun</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="page">
+
+  <!-- ── Toolbar ── -->
+  <header class="toolbar">
+    <button class="btn-icon" onclick="pickFile()" title="Open file">📂</button>
+    <h1>🎧 Transcriber-kun</h1>
+    <button class="btn-icon" onclick="router.go('settings')" title="Settings">⚙️</button>
+  </header>
+
+  <!-- ── Alert banner ── -->
+  <div id="main-alert" class="alert" hidden style="margin-top:8px"></div>
+
+  <!-- ── Drop zone (shown when no file loaded) ── -->
+  <div id="drop-zone">
+    <div class="drop-icon">🎵</div>
+    <div class="drop-title">Drop audio or video here</div>
+    <div class="drop-hint">
+      Supports mp3, m4a, wav, aac, mp4, mov, avi, mkv, webm<br>
+      or <span style="color:var(--accent);cursor:pointer" onclick="pickFile()">click to browse</span>
+    </div>
+  </div>
+
+  <!-- ── Current file info (shown after pick) ── -->
+  <div id="file-info" hidden style="margin-top:12px;display:flex;align-items:center;gap:8px">
+    <span style="font-size:12px;color:var(--text-secondary)">File:</span>
+    <span id="current-file-name" style="font-size:13px;font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+    <button class="btn-secondary" style="font-size:12px;padding:4px 10px"
+            onclick="document.getElementById('drop-zone').removeAttribute('hidden'); document.getElementById('file-info').setAttribute('hidden',''); document.getElementById('transcript-section').setAttribute('hidden',''); document.getElementById('memo-section').setAttribute('hidden','')">
+      ✕ Clear
+    </button>
+  </div>
+
+  <!-- ── Progress ── -->
+  <div id="progress-section" hidden style="margin-top:16px">
+    <div class="card" style="padding:16px">
+      <div class="progress-bar-outer">
+        <div class="progress-bar-inner" id="progress-bar-inner"></div>
+      </div>
+      <p class="progress-message" id="progress-message"></p>
+    </div>
+  </div>
+
+  <!-- ── Transcript section ── -->
+  <div id="transcript-section" hidden style="flex:1;overflow:hidden;display:flex;flex-direction:column;gap:10px;margin-top:12px">
+
+    <!-- Audio player bar -->
+    <div class="audio-bar">
+      <audio id="audio" controls></audio>
+      <span class="audio-filename" id="audio-filename"></span>
+    </div>
+
+    <!-- Scrollable transcript -->
+    <div id="transcript-body"></div>
+
+    <!-- Export buttons -->
+    <div class="export-bar">
+      <button id="btn-export-txt"  class="btn-secondary" disabled onclick="exportAs('txt')">
+        📄 Export .txt
+      </button>
+      <button id="btn-export-srt"  class="btn-secondary" disabled onclick="exportAs('srt')">
+        🎬 Export .srt
+      </button>
+      <button id="btn-export-json" class="btn-secondary" disabled onclick="exportAs('json')">
+        💾 Export .json
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Memo section (only shown when Gemini API key set) ── -->
+  <div id="memo-section" hidden style="margin-top:8px">
+    <hr style="border:none;border-top:1px solid var(--border);margin-bottom:12px">
+    <div class="memo-header">
+      <span style="font-size:15px;font-weight:600">📝 Meeting Memo</span>
+      <button id="btn-generate-memo" class="btn-primary" onclick="generateMemo()">
+        📋 Generate Memo
+      </button>
+    </div>
+    <p id="memo-hint" class="memo-hint" hidden></p>
+    <div id="memo-output" hidden></div>
+    <div style="margin-top:8px">
+      <button id="btn-memo-download" class="btn-secondary" hidden>
+        📥 Download Memo (.txt)
+      </button>
+    </div>
+  </div>
+
+</div><!-- .page -->
+
+<script src="js/router.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

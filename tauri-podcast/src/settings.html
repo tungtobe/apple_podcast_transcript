@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Settings — Transcriber-kun</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="page">
+
+  <!-- Toolbar -->
+  <header class="toolbar">
+    <button class="btn-icon" onclick="router.go('main')" title="Back">← Back</button>
+    <h1>Settings</h1>
+    <span style="width:64px"></span><!-- spacer to balance h1 centering -->
+  </header>
+
+  <div id="settings-banner" class="alert" hidden style="margin-top:10px"></div>
+
+  <div class="settings-layout" style="margin-top:16px">
+    <!-- Sidebar nav -->
+    <nav class="settings-nav">
+      <button id="nav-ai"            onclick="switchTab('ai')">🤖 AI Model</button>
+      <button id="nav-transcription" onclick="switchTab('transcription')">🎙 Transcription</button>
+      <button id="nav-memo"          onclick="switchTab('memo')">📝 Memo</button>
+      <button id="nav-storage"       onclick="switchTab('storage')">💾 Storage</button>
+    </nav>
+
+    <!-- Panels -->
+    <div class="settings-panel">
+
+      <!-- ── AI Model tab ── -->
+      <div id="tab-ai" class="tab-panel card">
+        <div class="settings-group">
+          <h3>AI Backend</h3>
+
+          <div class="form-row">
+            <label for="ai-mode">Transcription Engine</label>
+            <select id="ai-mode">
+              <option value="gemini">Gemini API (cloud, fast)</option>
+              <option value="whisper">Local Whisper (offline, private)</option>
+            </select>
+            <span class="hint">Gemini requires an API key. Whisper runs locally (~500 MB model).</span>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <h3>Gemini API</h3>
+
+          <div class="form-row">
+            <label for="gemini-api-key">API Key</label>
+            <div class="row">
+              <input type="password" id="gemini-api-key"
+                     placeholder="AIza..." class="flex-1">
+              <button id="btn-toggle-key" class="btn-secondary"
+                      onclick="toggleApiKeyVisibility()"
+                      style="white-space:nowrap" id="btn-toggle-key">👁 Show</button>
+            </div>
+            <span class="hint">
+              Get your key at
+              <a href="https://aistudio.google.com/app/apikey" style="color:var(--accent)">
+                aistudio.google.com ↗
+              </a>
+            </span>
+          </div>
+
+          <div class="form-row">
+            <label for="gemini-model">Gemini Model</label>
+            <div class="row model-row">
+              <input type="text" id="gemini-model"
+                     list="gemini-models-list"
+                     placeholder="gemini-2.0-flash"
+                     class="flex-1">
+              <datalist id="gemini-models-list"></datalist>
+              <button id="btn-load-gemini-models" class="btn-secondary"
+                      onclick="loadGeminiModels()"
+                      style="white-space:nowrap">↻ Load Models</button>
+            </div>
+            <span id="gemini-model-status" class="hint">
+              Type any Gemini model name, or load available generateContent models from Gemini.
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Transcription tab ── -->
+      <div id="tab-transcription" class="tab-panel card" hidden>
+        <div class="settings-group">
+          <h3>Whisper Settings</h3>
+
+          <div class="form-row">
+            <label for="whisper-model-size">Model Size</label>
+            <select id="whisper-model-size">
+              <option value="small">small (~500 MB, faster)</option>
+              <option value="medium">medium (~1.5 GB, more accurate)</option>
+            </select>
+            <span class="hint">Models are downloaded automatically on first use.</span>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <h3>Language</h3>
+
+          <div class="form-row">
+            <label for="language">Transcription Language</label>
+            <select id="language">
+              <option value="ja">Japanese (日本語)</option>
+              <option value="auto">Auto-detect</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <h3>Cache</h3>
+
+          <div class="toggle-row">
+            <label for="force-rerun">Force re-transcribe (ignore cache)</label>
+            <input type="checkbox" id="force-rerun">
+          </div>
+          <p class="hint mt-8">When enabled, the app will re-run transcription even if a cached
+             result exists for this file.</p>
+        </div>
+      </div>
+
+      <!-- ── Memo tab ── -->
+      <div id="tab-memo" class="tab-panel card" hidden>
+        <div class="settings-group">
+          <h3>Meeting Memo Prompt</h3>
+
+          <div class="form-row">
+            <label for="memo-prompt-template">Prompt Template</label>
+            <textarea id="memo-prompt-template" rows="16"
+                      placeholder="Use {transcript} where the transcript text should be inserted."></textarea>
+            <span class="hint">
+              Use <code>{transcript}</code> as the insertion point for the transcript.
+              If omitted, the transcript will be appended to the end of the prompt.
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Storage tab ── -->
+      <div id="tab-storage" class="tab-panel card" hidden>
+        <div class="settings-group">
+          <h3>Transcript Cache</h3>
+
+          <div class="form-row">
+            <label for="cache-dir">Cache Directory</label>
+            <div class="row">
+              <input type="text" id="cache-dir"
+                     placeholder="Leave blank for default" class="flex-1">
+              <button class="btn-secondary" onclick="openCacheFolder()">📂 Open</button>
+            </div>
+            <span class="hint">
+              Leave blank to use the default location:<br>
+              <code>~/Library/Application Support/com.transcriberkun.app/cache/</code>
+            </span>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <h3>Manage Cache</h3>
+          <p class="hint" style="margin-bottom:12px">
+            Cached transcripts speed up reloads. Clearing them frees disk space.
+          </p>
+          <button class="btn-danger" onclick="clearCache()">🗑 Clear All Cached Transcripts</button>
+        </div>
+      </div>
+
+    </div><!-- .settings-panel -->
+  </div><!-- .settings-layout -->
+
+  <!-- Footer actions -->
+  <div class="settings-footer" style="margin-top:auto">
+    <button class="btn-primary" onclick="saveSettings()">Save Settings</button>
+    <button class="btn-secondary" onclick="router.go('main')">Cancel</button>
+  </div>
+
+</div><!-- .page -->
+
+<script src="js/router.js"></script>
+<script src="js/settings.js"></script>
+</body>
+</html>
