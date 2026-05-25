@@ -1,6 +1,10 @@
 use serde::Deserialize;
-use tauri::{AppHandle, Emitter, Manager};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::AsyncBufReadExt;
+use tokio::process::Child;
+use tokio::sync::Mutex as AsyncMutex;
 
 #[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -19,16 +23,35 @@ pub struct TranscribeSettings {
 
 fn default_chunk_minutes() -> u32 { 10 }
 
+/// Registry of running transcription jobs, keyed by job_id.
+/// Cancellation kills the underlying Python child process.
+#[derive(Default)]
+pub struct JobRegistry {
+    jobs: Mutex<HashMap<String, Arc<AsyncMutex<Option<Child>>>>>,
+}
+
+impl JobRegistry {
+    fn insert(&self, job_id: String, slot: Arc<AsyncMutex<Option<Child>>>) {
+        self.jobs.lock().unwrap().insert(job_id, slot);
+    }
+    fn take(&self, job_id: &str) -> Option<Arc<AsyncMutex<Option<Child>>>> {
+        self.jobs.lock().unwrap().remove(job_id)
+    }
+}
+
 /// Start a transcription job.
 ///
 /// Progress is streamed as Tauri events named `transcribe:{job_id}`.
-/// Each event payload is a JSON string with `type` field:
+/// Each event payload is a JSON object with a `type` field:
 ///   {"type":"progress","step":N,"total":4,"message":"...","percent":0-100}
+///   {"type":"log","message":"..."}
 ///   {"type":"result","segments":[...],"cached":false}
 ///   {"type":"error","message":"..."}
+///   {"type":"cancelled"}
 #[tauri::command]
 pub async fn transcribe(
     app: AppHandle,
+    registry: State<'_, JobRegistry>,
     job_id: String,
     settings: TranscribeSettings,
 ) -> Result<(), String> {
@@ -44,7 +67,6 @@ pub async fn transcribe(
     let python = crate::python::resolve_python(&app_data_dir);
     let script = crate::python::resolve_script(&resource_dir, "transcriber.py");
 
-    // Ensure cache dir exists
     if !settings.cache_dir.is_empty() {
         let _ = std::fs::create_dir_all(&settings.cache_dir);
     }
@@ -78,66 +100,120 @@ pub async fn transcribe(
     cmd.arg("--chunk-minutes").arg(chunk_minutes.to_string());
 
     cmd.stdout(std::process::Stdio::piped())
-        // Discard stderr to prevent pipe-buffer deadlock.
-        // Python warnings/tracebacks won't block the process.
-        .stderr(std::process::Stdio::null());
+        .stderr(std::process::Stdio::null())
+        // Send SIGKILL automatically if the Child handle is dropped without wait.
+        .kill_on_drop(true);
 
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to start Python transcriber: {e}"))?;
 
+    let stdout = child.stdout.take();
+    let slot: Arc<AsyncMutex<Option<Child>>> = Arc::new(AsyncMutex::new(Some(child)));
+    registry.insert(job_id.clone(), slot.clone());
+
     let event_name = format!("transcribe:{job_id}");
+    let mut cancelled = false;
 
     // Stream stdout JSON lines as Tauri events
-    if let Some(stdout) = child.stdout.take() {
+    if let Some(stdout) = stdout {
         let reader = tokio::io::BufReader::new(stdout);
         let mut lines = reader.lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            if trimmed.starts_with('{') {
-                match serde_json::from_str::<serde_json::Value>(trimmed) {
-                    Ok(val) => {
-                        let is_final = val.get("type")
-                            .and_then(|t| t.as_str())
-                            .map(|t| t == "result" || t == "error")
-                            .unwrap_or(false);
-                        app.emit(&event_name, &val).ok();
-                        if is_final {
-                            break;
+        loop {
+            match lines.next_line().await {
+                Ok(Some(line)) => {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() || !trimmed.starts_with('{') {
+                        continue;
+                    }
+                    match serde_json::from_str::<serde_json::Value>(trimmed) {
+                        Ok(val) => {
+                            let is_final = val.get("type")
+                                .and_then(|t| t.as_str())
+                                .map(|t| t == "result" || t == "error")
+                                .unwrap_or(false);
+                            app.emit(&event_name, &val).ok();
+                            if is_final {
+                                break;
+                            }
+                        }
+                        Err(_) => {
+                            app.emit(
+                                &format!("transcribe:log:{job_id}"),
+                                serde_json::json!({"line": trimmed}),
+                            )
+                            .ok();
                         }
                     }
-                    Err(_) => {
-                        // Non-JSON stdout line (e.g. Python import warning) — log only
-                        app.emit(
-                            &format!("transcribe:log:{job_id}"),
-                            serde_json::json!({"line": trimmed}),
-                        )
-                        .ok();
+                }
+                // EOF: child stdout closed — either finished or was killed.
+                Ok(None) => break,
+                Err(_) => break,
+            }
+        }
+    }
+
+    // Reap the child and decide what to emit
+    {
+        let mut guard = slot.lock().await;
+        if let Some(mut child) = guard.take() {
+            match child.wait().await {
+                Ok(status) => {
+                    if !status.success() {
+                        // Distinguish cancel (we killed it) from real failure
+                        // by checking whether the registry still has the slot
+                        // — cancel_transcribe removes it before killing.
+                        if registry.take(&job_id).is_none() {
+                            cancelled = true;
+                        }
+                        if cancelled {
+                            app.emit(
+                                &event_name,
+                                serde_json::json!({"type":"cancelled","message":"Transcription cancelled."}),
+                            ).ok();
+                        } else {
+                            app.emit(
+                                &event_name,
+                                serde_json::json!({
+                                    "type": "error",
+                                    "message": format!(
+                                        "Transcription process exited with code {}",
+                                        status.code().unwrap_or(-1)
+                                    )
+                                }),
+                            ).ok();
+                        }
                     }
+                }
+                Err(e) => {
+                    app.emit(
+                        &event_name,
+                        serde_json::json!({"type":"error","message": format!("wait() failed: {e}")}),
+                    ).ok();
                 }
             }
         }
     }
 
-    // If Python exited non-zero but never emitted an error event, emit one now
-    if let Ok(status) = child.wait().await {
-        if !status.success() {
-            app.emit(
-                &event_name,
-                serde_json::json!({
-                    "type": "error",
-                    "message": format!(
-                        "Transcription process exited with code {}",
-                        status.code().unwrap_or(-1)
-                    )
-                }),
-            )
-            .ok();
-        }
-    }
+    // Ensure registry entry is removed on the normal-finish path too
+    registry.take(&job_id);
 
     Ok(())
+}
+
+/// Cancel an in-flight transcription job by killing its Python child process.
+#[tauri::command]
+pub async fn cancel_transcribe(
+    registry: State<'_, JobRegistry>,
+    job_id: String,
+) -> Result<bool, String> {
+    let slot = match registry.take(&job_id) {
+        Some(s) => s,
+        None => return Ok(false), // already finished or unknown
+    };
+    let mut guard = slot.lock().await;
+    if let Some(child) = guard.as_mut() {
+        let _ = child.start_kill();
+    }
+    Ok(true)
 }

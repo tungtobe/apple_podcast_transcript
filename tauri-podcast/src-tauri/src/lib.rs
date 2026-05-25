@@ -9,6 +9,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .manage(commands::transcribe::JobRegistry::default())
         .setup(|app| {
             // Emit app:ready so the frontend can trigger the setup check
             app.emit("app:ready", ()).ok();
@@ -18,6 +19,7 @@ pub fn run() {
             commands::setup::check_setup,
             commands::setup::install_deps,
             commands::transcribe::transcribe,
+            commands::transcribe::cancel_transcribe,
             commands::settings::get_settings,
             commands::settings::save_settings,
             commands::settings::get_cache_dir,

@@ -157,12 +157,30 @@ function handleTranscribeEvent({ payload }) {
     if (p.cached) showAlert('📌 Loaded from cache.', 'info');
     renderTranscript(segs);
 
+  } else if (p.type === 'cancelled') {
+    if (unlistenFn) { unlistenFn(); unlistenFn = null; }
+    showProgress(false);
+    showAlert('⛔ Transcription cancelled.', 'warn');
+
   } else if (p.type === 'error') {
     if (unlistenFn) { unlistenFn(); unlistenFn = null; }
     showProgress(false);
     showAlert(`❌ ${p.message}`, 'error');
   }
 }
+
+async function cancelTranscribe() {
+  if (!jobId) return;
+  const btn = document.getElementById('btn-cancel-transcribe');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Cancelling...'; }
+  try {
+    await invoke('cancel_transcribe', { jobId });
+  } catch (err) {
+    showAlert(`Failed to cancel: ${err}`, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '✖ Cancel'; }
+  }
+}
+window.cancelTranscribe = cancelTranscribe;
 
 function appendDebugLog(line) {
   const el = document.getElementById('debug-log');
@@ -176,13 +194,16 @@ function showProgress(visible, msg = '', pct = 0) {
   const section = document.getElementById('progress-section');
   const bar     = document.getElementById('progress-bar-inner');
   const msgEl   = document.getElementById('progress-message');
+  const cancelBtn = document.getElementById('btn-cancel-transcribe');
 
   if (visible) {
     section.removeAttribute('hidden');
     bar.style.width = `${pct}%`;
     msgEl.textContent = msg;
+    if (cancelBtn) { cancelBtn.disabled = false; cancelBtn.textContent = '✖ Cancel'; }
   } else {
     section.setAttribute('hidden', '');
+    jobId = null;
   }
 }
 
