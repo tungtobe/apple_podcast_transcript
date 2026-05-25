@@ -44,6 +44,8 @@ pub struct AppSettings {
     pub cache_dir: String,         // empty = use app_data_dir/cache
     #[serde(default = "default_chunk_minutes")]
     pub chunk_minutes: u32,        // Gemini audio chunk size in minutes
+    #[serde(default)]
+    pub gemini_timestamp_offset: f64, // Seconds added to Gemini timestamps at render-time
     #[serde(default = "default_memo_prompt_template")]
     pub memo_prompt_template: String,
 }
@@ -67,6 +69,7 @@ impl Default for AppSettings {
             force_rerun: false,
             cache_dir: String::new(),
             chunk_minutes: default_chunk_minutes(),
+            gemini_timestamp_offset: 0.0,
             memo_prompt_template: default_memo_prompt_template(),
         }
     }

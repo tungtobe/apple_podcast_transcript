@@ -53,8 +53,8 @@ def emit_progress(step: int, total: int, message: str, percent: int = None):
           "message": message, "percent": percent})
 
 
-def emit_result(segments: list, cached: bool = False):
-    emit({"type": "result", "segments": segments, "cached": cached})
+def emit_result(segments: list, cached: bool = False, engine: str = ""):
+    emit({"type": "result", "segments": segments, "cached": cached, "engine": engine})
 
 
 def emit_error(message: str):
@@ -465,13 +465,13 @@ def transcribe_whisper(audio_path: str, language: str, model_size: str) -> list:
 
 # ─── cache helpers ─────────────────────────────────────────────────────────────
 
-def write_cache(cache_dir: str, file_hash: str, segments: list):
+def write_cache(cache_dir: str, file_hash: str, segments: list, engine: str = ""):
     os.makedirs(cache_dir, exist_ok=True)
 
     # JSON
     json_path = os.path.join(cache_dir, f"{file_hash}.json")
     with open(json_path, "w", encoding="utf-8") as f:
-        json.dump({"segments": segments}, f, ensure_ascii=False, indent=2)
+        json.dump({"engine": engine, "segments": segments}, f, ensure_ascii=False, indent=2)
 
     # TXT
     txt_path = os.path.join(cache_dir, f"{file_hash}.txt")
@@ -551,7 +551,12 @@ def main():
         if os.path.exists(cache_json) and not args.force_rerun:
             with open(cache_json, "r", encoding="utf-8") as f:
                 cached = json.load(f)
-            emit_result(cached.get("segments", cached if isinstance(cached, list) else []), cached=True)
+            if isinstance(cached, list):
+                cached_segments, cached_engine = cached, ""
+            else:
+                cached_segments = cached.get("segments", [])
+                cached_engine = cached.get("engine", "")
+            emit_result(cached_segments, cached=True, engine=cached_engine or args.mode)
             return
 
         # ── Transcription ──────────────────────────────────────────────────
@@ -566,8 +571,8 @@ def main():
             segments = transcribe_whisper(audio_path, args.language, args.model_size)
 
         # ── Save cache ─────────────────────────────────────────────────────
-        write_cache(args.cache_dir, file_hash, segments)
-        emit_result(segments, cached=False)
+        write_cache(args.cache_dir, file_hash, segments, engine=args.mode)
+        emit_result(segments, cached=False, engine=args.mode)
 
     except Exception as e:
         emit_error(str(e))

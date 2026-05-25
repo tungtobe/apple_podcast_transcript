@@ -7,10 +7,16 @@ let settings       = null;
 let currentFile    = null;   // absolute path
 let currentSegments = null;
 let currentFileHash = null;
+let currentEngine  = '';     // "gemini" | "whisper" — drives timestamp-offset application
 let jobId          = null;
 let unlistenFn     = null;
 let audioEl        = null;
 let lastActive     = null;
+
+function timestampOffset() {
+  if (currentEngine !== 'gemini') return 0;
+  return parseFloat(settings?.geminiTimestampOffset) || 0;
+}
 
 // ── Init ───────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', async () => {
@@ -221,6 +227,7 @@ function handleTranscribeEvent({ payload }) {
     const segs = Array.isArray(p.segments) ? [...p.segments] : [];
     segs.sort((a, b) => (parseFloat(a.start) || 0) - (parseFloat(b.start) || 0));
     currentSegments = segs;
+    currentEngine   = p.engine || '';
     if (p.cached) showAlert('📌 Loaded from cache.', 'info');
     renderTranscript(segs);
 
@@ -294,10 +301,15 @@ function renderTranscript(segments) {
   body.innerHTML = '';
   lastActive = null;
 
-  // Render clickable segments (reuses original Streamlit logic)
+  // Apply timestamp offset (only meaningful for Gemini — `timestampOffset()`
+  // returns 0 otherwise). Cache stores raw model timestamps; the shift is
+  // purely cosmetic so the user can re-tune without re-running the job.
+  const off = timestampOffset();
   segments.forEach((seg, i) => {
-    const start = parseFloat(seg.start ?? 0);
-    const end   = parseFloat(seg.end   ?? 0);
+    const rawStart = parseFloat(seg.start ?? 0);
+    const rawEnd   = parseFloat(seg.end   ?? 0);
+    const start = Math.max(0, rawStart + off);
+    const end   = Math.max(0, rawEnd   + off);
     const text  = (seg.text || '').replace(/\n/g, ' ');
     const timeStr = formatTime(start);
 
