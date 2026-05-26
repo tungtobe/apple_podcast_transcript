@@ -54,7 +54,168 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   initDropZone();
   await tryResumeActiveJob();
+  if (!jobId) renderHistory();
 });
+
+// ── History (recent completed transcripts) ────────────────────────────────
+async function resolveCacheDir() {
+  let cacheDir = settings?.cacheDir || '';
+  if (!cacheDir) {
+    cacheDir = await invoke('get_cache_dir').catch(() => '');
+  }
+  return cacheDir;
+}
+
+function formatRelativeDate(iso) {
+  if (!iso) return '';
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return iso;
+  const diff = (Date.now() - t) / 1000;
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 86400 * 7) return `${Math.floor(diff / 86400)}d ago`;
+  const d = new Date(t);
+  return d.toLocaleDateString();
+}
+
+function formatDuration(sec) {
+  if (!sec || sec <= 0) return '';
+  const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+  if (m >= 60) {
+    const h = Math.floor(m / 60); return `${h}h${m % 60}m`;
+  }
+  return `${m}m${pad(s)}s`;
+}
+
+async function renderHistory() {
+  const section = document.getElementById('history-section');
+  const list    = document.getElementById('history-list');
+  const empty   = document.getElementById('history-empty');
+  if (!section || !list) return;
+  const cacheDir = await resolveCacheDir();
+  let entries = [];
+  try { entries = await invoke('list_transcripts', { cacheDir }); }
+  catch (err) { console.warn('list_transcripts failed', err); entries = []; }
+
+  list.innerHTML = '';
+  if (entries.length === 0) {
+    empty.removeAttribute('hidden');
+    return;
+  }
+  empty.setAttribute('hidden', '');
+
+  for (const e of entries) {
+    const li = document.createElement('div');
+    li.className = 'history-item';
+    const dur = formatDuration(e.durationSec);
+    const date = formatRelativeDate(e.createdAt);
+    const engineLabel = e.engine ? `<span class="badge">${e.engine}</span>` : '';
+    const memoLabel = e.hasMemo ? `<span class="badge badge-memo">memo</span>` : '';
+    li.innerHTML = `
+      <div class="history-item-main">
+        <div class="history-item-title" title="${escapeHtml(e.sourcePath || e.sourceName)}">${escapeHtml(e.sourceName || 'Unknown')}</div>
+        <div class="history-item-meta">
+          ${engineLabel}${memoLabel}
+          <span>${e.segmentCount} segs</span>
+          ${dur ? `<span>${dur}</span>` : ''}
+          <span>${date}</span>
+        </div>
+      </div>
+      <div class="history-item-actions">
+        <button class="btn-secondary btn-open">📂 Open</button>
+        <button class="btn-danger btn-del" title="Delete">🗑</button>
+      </div>
+    `;
+    li.querySelector('.btn-open').onclick = () => openHistoryEntry(e);
+    li.querySelector('.btn-del').onclick  = () => deleteHistoryEntry(e);
+    list.appendChild(li);
+  }
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+async function openHistoryEntry(entry) {
+  const cacheDir = await resolveCacheDir();
+  let data;
+  try {
+    data = await invoke('load_transcript', { cacheDir, fileHash: entry.fileHash });
+  } catch (err) {
+    showAlert(`Failed to load transcript: ${err}`, 'error');
+    return;
+  }
+
+  currentFile     = data.meta?.sourcePath || '';
+  currentSegments = Array.isArray(data.segments) ? [...data.segments] : [];
+  currentEngine   = data.engine || data.meta?.engine || '';
+
+  document.getElementById('drop-zone').setAttribute('hidden', '');
+  document.getElementById('history-section').setAttribute('hidden', '');
+  document.getElementById('file-info').removeAttribute('hidden');
+  document.getElementById('current-file-name').textContent =
+    (currentFile && currentFile.split('/').pop()) || data.meta?.sourceName || 'Transcript';
+
+  renderTranscript(currentSegments);
+  showAlert('📌 Loaded from history.', 'info');
+
+  if (data.memo) {
+    showMemoContent(data.memo);
+    const btn = document.getElementById('btn-generate-memo');
+    if (btn) btn.textContent = '📋 Regenerate Memo';
+  }
+}
+
+async function deleteHistoryEntry(entry) {
+  const name = entry.sourceName || entry.fileHash;
+  if (!window.confirm(`Delete transcript for "${name}"? This removes cached transcript, memo and exports.`)) return;
+  const cacheDir = await resolveCacheDir();
+  try {
+    await invoke('delete_transcript', {
+      cacheDir,
+      fileHash: entry.fileHash,
+      sourceName: entry.sourceName || '',
+    });
+  } catch (err) {
+    showAlert(`Delete failed: ${err}`, 'error');
+    return;
+  }
+  renderHistory();
+}
+
+function clearCurrentFile() {
+  console.log('[clearCurrentFile] running, jobId=', jobId);
+  if (jobId) {
+    showAlert('A transcription is in progress. Cancel it first.', 'warn');
+    return;
+  }
+  currentFile = null;
+  currentSegments = null;
+  currentEngine = '';
+  if (audioEl) {
+    try { audioEl.pause(); } catch {}
+    audioEl.removeAttribute('src');
+    try { audioEl.load(); } catch {}
+  }
+  lastActive = null;
+  const body = document.getElementById('transcript-body');
+  if (body) body.innerHTML = '';
+  const memoOut = document.getElementById('memo-output');
+  if (memoOut) { memoOut.textContent = ''; memoOut.setAttribute('hidden', ''); }
+  showAlert(null);
+  document.getElementById('drop-zone').removeAttribute('hidden');
+  document.getElementById('history-section').removeAttribute('hidden');
+  document.getElementById('file-info').setAttribute('hidden', '');
+  document.getElementById('transcript-section').setAttribute('hidden', '');
+  document.getElementById('memo-section').setAttribute('hidden', '');
+  document.getElementById('progress-section')?.setAttribute('hidden', '');
+  renderHistory();
+}
+window.clearCurrentFile = clearCurrentFile;
+window.renderHistory = renderHistory;
 
 // ── Resume in-flight job after page navigation ─────────────────────────────
 const JOB_STATE_KEY = 'transcribeJobState';
@@ -100,6 +261,7 @@ async function tryResumeActiveJob() {
   if (currentFile) {
     document.getElementById('current-file-name').textContent = currentFile.split('/').pop();
     document.getElementById('drop-zone').setAttribute('hidden', '');
+    document.getElementById('history-section')?.setAttribute('hidden', '');
     document.getElementById('file-info').removeAttribute('hidden');
   }
   showProgress(true, saved.message || '⏳ Resuming...', saved.percent || 0);
@@ -155,6 +317,7 @@ function loadFilePath(path) {
   const name = path.split('/').pop();
   document.getElementById('current-file-name').textContent = name;
   document.getElementById('drop-zone').setAttribute('hidden', '');
+  document.getElementById('history-section')?.setAttribute('hidden', '');
   document.getElementById('file-info').removeAttribute('hidden');
   startTranscription();
 }

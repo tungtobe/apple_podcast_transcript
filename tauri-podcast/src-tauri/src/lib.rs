@@ -33,6 +33,9 @@ pub fn run() {
             commands::files::write_json_file,
             commands::files::clear_cache,
             commands::memo::generate_memo,
+            commands::history::list_transcripts,
+            commands::history::load_transcript,
+            commands::history::delete_transcript,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application")

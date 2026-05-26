@@ -12,7 +12,7 @@
   <!-- ── Toolbar ── -->
   <header class="toolbar">
     <span style="width:32px"></span><!-- spacer to balance h1 centering -->
-    <h1>🎧 Transcriber-kun</h1>
+    <h1 class="home-link" onclick="clearCurrentFile()" title="Home">🎧 Transcriber-kun</h1>
     <button class="btn-icon" onclick="router.go('settings')" title="Settings">⚙️</button>
   </header>
 
@@ -29,12 +29,22 @@
     </div>
   </div>
 
+  <!-- ── Recent transcripts (shown when no file loaded) ── -->
+  <div id="history-section" style="margin-top:16px">
+    <div class="history-header">
+      <span style="font-size:14px;font-weight:600">📜 Recent transcripts</span>
+      <button class="btn-icon" id="btn-history-refresh" title="Refresh" onclick="renderHistory()">🔄</button>
+    </div>
+    <div id="history-list"></div>
+    <p id="history-empty" class="history-empty" hidden>No transcripts yet.</p>
+  </div>
+
   <!-- ── Current file info (shown after pick) ── -->
   <div id="file-info" hidden style="margin-top:12px;display:flex;align-items:center;gap:8px">
     <span style="font-size:12px;color:var(--text-secondary)">File:</span>
     <span id="current-file-name" style="font-size:13px;font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
     <button class="btn-secondary" style="font-size:12px;padding:4px 10px"
-            onclick="document.getElementById('drop-zone').removeAttribute('hidden'); document.getElementById('file-info').setAttribute('hidden',''); document.getElementById('transcript-section').setAttribute('hidden',''); document.getElementById('memo-section').setAttribute('hidden','')">
+            onclick="clearCurrentFile()">
       ✕ Clear
     </button>
   </div>

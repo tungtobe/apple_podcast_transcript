@@ -465,13 +465,50 @@ def transcribe_whisper(audio_path: str, language: str, model_size: str) -> list:
 
 # ─── cache helpers ─────────────────────────────────────────────────────────────
 
-def write_cache(cache_dir: str, file_hash: str, segments: list, engine: str = ""):
+def write_meta(cache_dir: str, file_hash: str, segments: list, engine: str,
+               source_path: str, mode: str = "", language: str = "",
+               model_size: str = ""):
+    """Write sidecar `<file_hash>.meta.json` describing the transcript.
+
+    Used by the History UI to list completed jobs without re-parsing transcripts.
+    """
+    os.makedirs(cache_dir, exist_ok=True)
+    duration = 0.0
+    for s in segments:
+        try:
+            duration = max(duration, float(s.get("end", 0) or 0))
+        except (TypeError, ValueError):
+            pass
+    meta = {
+        "file_hash": file_hash,
+        "source_path": source_path or "",
+        "source_name": os.path.basename(source_path) if source_path else "",
+        "engine": engine,
+        "mode": mode,
+        "language": language,
+        "model_size": model_size,
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "segment_count": len(segments),
+        "duration_sec": duration,
+    }
+    meta_path = os.path.join(cache_dir, f"{file_hash}.meta.json")
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+    return meta_path
+
+
+def write_cache(cache_dir: str, file_hash: str, segments: list, engine: str = "",
+                source_path: str = "", mode: str = "", language: str = "",
+                model_size: str = ""):
     os.makedirs(cache_dir, exist_ok=True)
 
     # JSON
     json_path = os.path.join(cache_dir, f"{file_hash}.json")
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump({"engine": engine, "segments": segments}, f, ensure_ascii=False, indent=2)
+
+    # Meta sidecar (used by History UI)
+    write_meta(cache_dir, file_hash, segments, engine, source_path, mode, language, model_size)
 
     # TXT
     txt_path = os.path.join(cache_dir, f"{file_hash}.txt")
@@ -556,6 +593,15 @@ def main():
             else:
                 cached_segments = cached.get("segments", [])
                 cached_engine = cached.get("engine", "")
+            # Back-fill meta sidecar for legacy caches that pre-date the History feature.
+            meta_path = os.path.join(args.cache_dir, f"{file_hash}.meta.json")
+            if not os.path.exists(meta_path):
+                try:
+                    write_meta(args.cache_dir, file_hash, cached_segments,
+                               cached_engine or args.mode, source_path,
+                               args.mode, args.language, args.model_size)
+                except Exception as e:
+                    emit_log(f"meta back-fill failed: {e}")
             emit_result(cached_segments, cached=True, engine=cached_engine or args.mode)
             return
 
@@ -571,7 +617,9 @@ def main():
             segments = transcribe_whisper(audio_path, args.language, args.model_size)
 
         # ── Save cache ─────────────────────────────────────────────────────
-        write_cache(args.cache_dir, file_hash, segments, engine=args.mode)
+        write_cache(args.cache_dir, file_hash, segments, engine=args.mode,
+                    source_path=source_path, mode=args.mode,
+                    language=args.language, model_size=args.model_size)
         emit_result(segments, cached=False, engine=args.mode)
 
     except Exception as e:
