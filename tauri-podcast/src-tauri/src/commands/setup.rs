@@ -10,15 +10,34 @@ pub struct SetupStatus {
     pub missing_packages: Vec<String>,
 }
 
+fn ffmpeg_candidates() -> Vec<&'static str> {
+    vec![
+        "/opt/homebrew/bin/ffmpeg",   // Homebrew Apple Silicon
+        "/usr/local/bin/ffmpeg",      // Homebrew Intel
+        "/opt/local/bin/ffmpeg",      // MacPorts
+        "ffmpeg",                      // PATH fallback
+    ]
+}
+
 async fn check_ffmpeg_available() -> bool {
-    tokio::process::Command::new("ffmpeg")
-        .arg("-version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .await
-        .map(|status| status.success())
-        .unwrap_or(false)
+    for path in ffmpeg_candidates() {
+        // For absolute paths, verify the file exists first to avoid noisy fork errors
+        if path.starts_with('/') && !std::path::Path::new(path).exists() {
+            continue;
+        }
+        let ok = tokio::process::Command::new(path)
+            .arg("-version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if ok {
+            return true;
+        }
+    }
+    false
 }
 
 /// Check Python version, ffmpeg, and required pip packages.
@@ -65,8 +84,14 @@ pub async fn check_setup(app: AppHandle) -> Result<SetupStatus, String> {
             )
         })?;
 
-    serde_json::from_str::<SetupStatus>(json_line)
-        .map_err(|e| format!("Bad setup_check JSON: {e}\nRaw: {json_line}"))
+    let mut status: SetupStatus = serde_json::from_str(json_line)
+        .map_err(|e| format!("Bad setup_check JSON: {e}\nRaw: {json_line}"))?;
+
+    // Override Python script's ffmpeg check — it uses PATH which is empty
+    // when the app is launched from Finder.
+    status.ffmpeg_ok = check_ffmpeg_available().await;
+
+    Ok(status)
 }
 
 /// Install missing pip packages into the app-managed venv.

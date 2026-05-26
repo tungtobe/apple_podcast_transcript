@@ -1,14 +1,48 @@
 use std::path::{Path, PathBuf};
+use std::process::Command;
+
+const MIN_MINOR: u32 = 10;
+// Newer versions first — we prefer the latest available
+const VERSIONS: &[&str] = &["3.14", "3.13", "3.12", "3.11", "3.10"];
 
 fn default_python_candidates() -> Vec<PathBuf> {
-    vec![
-        // Homebrew Python (Apple Silicon)
-        PathBuf::from("/opt/homebrew/bin/python3"),
-        // Homebrew Python (Intel Mac)
-        PathBuf::from("/usr/local/bin/python3"),
-        // Apple Command Line Tools Python, when available
-        PathBuf::from("/usr/bin/python3"),
-    ]
+    let mut paths: Vec<PathBuf> = Vec::new();
+
+    // Versioned binaries (Homebrew + python.org installer)
+    for v in VERSIONS {
+        // Homebrew Apple Silicon
+        paths.push(PathBuf::from(format!("/opt/homebrew/bin/python{v}")));
+        // Homebrew Intel
+        paths.push(PathBuf::from(format!("/usr/local/bin/python{v}")));
+        // python.org installer
+        paths.push(PathBuf::from(format!(
+            "/Library/Frameworks/Python.framework/Versions/{v}/bin/python3"
+        )));
+    }
+
+    // Generic python3 fallbacks
+    paths.push(PathBuf::from("/opt/homebrew/bin/python3"));
+    paths.push(PathBuf::from("/usr/local/bin/python3"));
+    // System Python (3.9 on macOS — usually too old, kept as last resort)
+    paths.push(PathBuf::from("/usr/bin/python3"));
+
+    paths
+}
+
+/// Return (major, minor) by running `python --version`. None if unrunnable.
+fn python_version(path: &Path) -> Option<(u32, u32)> {
+    let out = Command::new(path).arg("--version").output().ok()?;
+    let text = if !out.stdout.is_empty() {
+        String::from_utf8_lossy(&out.stdout)
+    } else {
+        String::from_utf8_lossy(&out.stderr)
+    };
+    // Format: "Python 3.12.4"
+    let v = text.trim().strip_prefix("Python ")?;
+    let mut parts = v.split('.');
+    let major: u32 = parts.next()?.parse().ok()?;
+    let minor: u32 = parts.next()?.parse().ok()?;
+    Some((major, minor))
 }
 
 pub fn find_python(app_data_dir: &Path) -> Option<String> {
@@ -21,10 +55,24 @@ fn find_python_from_candidates(app_data_dir: &Path, candidates: &[PathBuf]) -> O
         return Some(venv_python.to_string_lossy().to_string());
     }
 
+    // Prefer a candidate whose version is >= 3.10
+    for candidate in candidates {
+        if !candidate.exists() {
+            continue;
+        }
+        if let Some((major, minor)) = python_version(candidate) {
+            if major > 3 || (major == 3 && minor >= MIN_MINOR) {
+                return Some(candidate.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    // Nothing >= 3.10 found — return the first existing candidate so the UI
+    // can report the version it did find (e.g. 3.9.x) instead of "no python".
     candidates
         .iter()
-        .find(|candidate| candidate.exists())
-        .map(|candidate| candidate.to_string_lossy().to_string())
+        .find(|c| c.exists())
+        .map(|c| c.to_string_lossy().to_string())
 }
 
 /// Returns path to Python executable to use.
