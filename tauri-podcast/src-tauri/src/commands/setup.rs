@@ -111,29 +111,65 @@ pub async fn install_deps(app: AppHandle, packages: Vec<String>) -> Result<(), S
     )
     .ok();
 
+    // Upgrade pip first to avoid outdated pip errors
+    app.emit("install:progress", "⚙️ Upgrading pip...").ok();
+    let _ = tokio::process::Command::new(&venv_python)
+        .args(["-m", "pip", "install", "--upgrade", "pip"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await;
+
     let mut child = tokio::process::Command::new(&venv_python)
         .arg("-m").arg("pip").arg("install")
         .args(&packages)
         .stdout(std::process::Stdio::piped())
-        // Discard stderr to prevent pipe-buffer deadlock
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| format!("pip install failed to start: {e}"))?;
 
-    // Stream stdout lines
-    if let Some(stdout) = child.stdout.take() {
-        let reader = tokio::io::BufReader::new(stdout);
-        let mut lines = reader.lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            app.emit("install:progress", &line).ok();
+    // Take stdout/stderr before spawning tasks
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+
+    // Stream stdout and stderr concurrently to prevent pipe-buffer deadlock
+    let app_stdout = app.clone();
+    let app_stderr = app.clone();
+
+    let stdout_task = tokio::spawn(async move {
+        if let Some(stdout) = stdout {
+            let reader = tokio::io::BufReader::new(stdout);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                app_stdout.emit("install:progress", &line).ok();
+            }
         }
-    }
+    });
+
+    // Capture stderr and forward as error lines
+    let stderr_lines = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<String>::new()));
+    let stderr_lines_clone = stderr_lines.clone();
+    let stderr_task = tokio::spawn(async move {
+        if let Some(stderr) = stderr {
+            let reader = tokio::io::BufReader::new(stderr);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                if !line.trim().is_empty() {
+                    app_stderr.emit("install:progress", format!("⚠️ {line}")).ok();
+                    stderr_lines_clone.lock().await.push(line);
+                }
+            }
+        }
+    });
 
     let status = child.wait().await.map_err(|e| e.to_string())?;
+    let _ = tokio::join!(stdout_task, stderr_task);
+
     if status.success() {
         app.emit("install:progress", "✅ All packages installed successfully!").ok();
         Ok(())
     } else {
-        Err("pip install failed. Check the log above for details.".to_string())
+        let errors = stderr_lines.lock().await.join("\n");
+        Err(format!("pip install failed:\n{errors}"))
     }
 }

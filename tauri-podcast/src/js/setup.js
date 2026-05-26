@@ -5,6 +5,7 @@ const { invoke, event: tauriEvent } = window.__TAURI__.core;
 // ── State ──────────────────────────────────────────────────────────────────
 let setupStatus = null;
 let unlisten = null;
+let autoInstallDone = false; // chỉ auto-install 1 lần mỗi session
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const iconPython   = () => document.getElementById('icon-python');
@@ -78,6 +79,12 @@ function applyStatus(status) {
     detailPkgs().textContent = `Missing: ${status.missing_packages.join(', ')}`;
     btnInstall()?.removeAttribute('hidden');
     btnInstall()?.removeAttribute('disabled');
+
+    // Auto-install lần đầu nếu Python đã có sẵn
+    if (!autoInstallDone) {
+      autoInstallDone = true;
+      installPackages();
+    }
   }
 
   // ffmpeg
@@ -114,8 +121,9 @@ async function installPackages() {
 
   btnInstall().disabled = true;
   btnInstall().textContent = '⏳ Installing...';
+  btnContinue()?.setAttribute('disabled', '');
   installLogWrap().removeAttribute('hidden');
-  installLog().textContent = '';
+  installLog().textContent = `📦 Auto-installing: ${setupStatus.missing_packages.join(', ')}\n`;
   iconPkgs().textContent = '⏳';
 
   if (unlisten) { unlisten(); unlisten = null; }
