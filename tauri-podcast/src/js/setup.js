@@ -23,7 +23,7 @@ const installLogWrap = () => document.getElementById('install-log-wrap');
 // ── Init ───────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', async () => {
   // Try to use status cached from main.js redirect first
-  const cached = router.state('setup');
+  const cached = window.router.state('setup');
   if (cached) {
     applyStatus(cached);
   } else {
@@ -171,4 +171,4 @@ function escapeHtml(s) {
 // ── Expose to HTML ─────────────────────────────────────────────────────────
 window.installPackages = installPackages;
 window.recheckSetup = runCheck;
-window.continueToApp = () => router.go('main');
+window.continueToApp = () => window.router.go('main');

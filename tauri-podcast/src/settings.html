@@ -11,8 +11,8 @@
 
   <!-- Toolbar -->
   <header class="toolbar">
-    <button class="btn-icon" onclick="router.go('main')" title="Back">← Back</button>
-    <h1 class="home-link" onclick="router.go('main')" title="Home">Settings</h1>
+    <button class="btn-icon" data-route="main" title="Back">← Back</button>
+    <h1 class="home-link" data-route="main" title="Home">Settings</h1>
     <span style="width:64px"></span><!-- spacer to balance h1 centering -->
   </header>
 
@@ -197,7 +197,7 @@
   <!-- Footer actions -->
   <div class="settings-footer" style="margin-top:auto">
     <button class="btn-primary" onclick="saveSettings()">Save Settings</button>
-    <button class="btn-secondary" onclick="router.go('main')">Cancel</button>
+    <button class="btn-secondary" data-route="main">Cancel</button>
   </div>
 
 </div><!-- .page -->

@@ -43,12 +43,12 @@ window.addEventListener('DOMContentLoaded', async () => {
   try {
     const status = await invoke('check_setup');
     if (!status.python_ok || status.missing_packages.length > 0) {
-      router.go('setup', status);
+      window.router.go('setup', status);
       return;
     }
   } catch {
     // If check_setup fails (e.g. no Python at all) go to setup wizard
-    router.go('setup', { python_ok: false, ffmpeg_ok: false, missing_packages: [] });
+    window.router.go('setup', { python_ok: false, ffmpeg_ok: false, missing_packages: [] });
     return;
   }
 
@@ -584,7 +584,7 @@ function buildMemoSection() {
 
   if (!settings?.geminiApiKey) {
     btn.textContent = '⚙️ Set Gemini API Key';
-    btn.onclick = () => router.go('settings');
+    btn.onclick = () => window.router.go('settings');
     hint.textContent = 'Meeting memo generation uses Gemini. Add your Gemini API key in Settings to enable summaries and action items.';
     hint.removeAttribute('hidden');
     output.setAttribute('hidden', '');
