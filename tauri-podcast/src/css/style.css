@@ -12,8 +12,7 @@
   --warn: #ff9500;
   --radius: 10px;
   --shadow: 0 1px 3px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.06);
-  --titlebar-safe-top: 32px;
-  --traffic-light-safe-left: 92px;
+  --toolbar-height: 44px;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -27,16 +26,11 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* ── Traffic-light safe zone (titleBarStyle: Overlay) ── */
-body {
-  padding-top: var(--titlebar-safe-top);
-}
-
 /* ── Layout ── */
 .page {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - var(--titlebar-safe-top));
+  height: 100vh;
   max-width: 1100px;
   margin: 0 auto;
   padding: 0 20px 20px;
@@ -44,22 +38,38 @@ body {
 
 /* ── Toolbar ── */
 .toolbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 10px;
-  padding: 10px 0 12px var(--traffic-light-safe-left);
+  min-height: var(--toolbar-height);
+  padding: 0;
   border-bottom: 1px solid var(--border);
-  -webkit-app-region: drag;
+  user-select: none;
+  position: relative;
+  z-index: 10;
 }
-.toolbar > * { -webkit-app-region: no-drag; }
 
-.toolbar h1 {
+.toolbar-side,
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  min-width: 32px;
+}
+
+.toolbar-actions {
+  justify-content: flex-end;
+}
+
+.toolbar-title {
   font-size: 15px;
   font-weight: 600;
-  flex: 1;
   text-align: center;
   color: var(--text);
-  margin-left: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 /* ── Buttons ── */
@@ -385,20 +395,19 @@ input[type="checkbox"] {
 .setup-shell {
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - var(--titlebar-safe-top));
+  min-height: 100vh;
 }
 
 .setup-titlebar {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 44px;
+  flex: 0 0 var(--toolbar-height);
   border-bottom: 1px solid var(--border);
   color: var(--text);
   font-size: 13px;
   font-weight: 600;
   user-select: none;
-  -webkit-app-region: drag;
 }
 
 .setup-page {
@@ -538,14 +547,5 @@ input[type="checkbox"] {
 
 .home-link {
   color: inherit; text-decoration: none; cursor: pointer;
-  -webkit-app-region: no-drag; app-region: no-drag;
 }
 .home-link:hover { opacity: 0.7; }
-
-/* Ensure toolbar children stay above any sibling section and remain clickable. */
-.toolbar { position: relative; z-index: 10; }
-.toolbar h1, .toolbar button, .toolbar > * {
-  -webkit-app-region: no-drag !important;
-  app-region: no-drag !important;
-  pointer-events: auto !important;
-}
