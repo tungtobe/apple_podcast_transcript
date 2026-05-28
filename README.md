@@ -45,6 +45,18 @@ npm install
 
 `.env` không bắt buộc — API key Gemini cấu hình trong app (Settings → AI Model).
 
+### Lưu ý trên macOS
+
+App mở từ Finder không nhận đầy đủ `PATH` từ shell (`.zshrc`, `.zprofile`), nên app tự dò các vị trí phổ biến của Homebrew, MacPorts, python.org, pyenv/asdf/mise và truyền `PATH` đó cho Python child process.
+
+Nếu Setup vẫn báo Python 3.9.x sau khi đã cài Python mới, nguyên nhân thường là venv cũ ở:
+
+```bash
+~/Library/Application Support/com.transcriberkun.app/venv/
+```
+
+Chạy lại `./setup.sh` sẽ tự xoá/recreate venv lỗi thời. Hoặc xoá thủ công venv này rồi mở app và bấm **Check Again**.
+
 ---
 
 ## 3. Chạy

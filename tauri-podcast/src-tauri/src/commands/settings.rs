@@ -150,11 +150,13 @@ pub async fn list_gemini_models(app: AppHandle, api_key: String) -> Result<Vec<S
         .app_data_dir()
         .map_err(|e| format!("Cannot find app data dir: {e}"))?;
 
-    let python = crate::python::resolve_python(&app_data_dir);
+    let python = crate::python::find_supported_python(&app_data_dir)
+        .ok_or_else(|| "Python 3.10+ is required. Please complete Setup first.".to_string())?;
     let script = crate::python::resolve_script(&resource_dir, "list_gemini_models.py");
 
     let output = tokio::process::Command::new(&python)
         .arg(script.to_str().unwrap_or(""))
+        .env("PATH", crate::python::tool_path_env())
         .env("GEMINI_API_KEY", key)
         .output()
         .await

@@ -76,7 +76,8 @@ pub async fn transcribe(
         .app_data_dir()
         .map_err(|e| format!("Cannot find app data dir: {e}"))?;
 
-    let python = crate::python::resolve_python(&app_data_dir);
+    let python = crate::python::find_supported_python(&app_data_dir)
+        .ok_or_else(|| "Python 3.10+ is required. Please complete Setup first.".to_string())?;
     let script = crate::python::resolve_script(&resource_dir, "transcriber.py");
 
     if !settings.cache_dir.is_empty() {
@@ -85,6 +86,7 @@ pub async fn transcribe(
 
     let mut cmd = tokio::process::Command::new(&python);
     cmd.arg(script.to_str().unwrap_or(""))
+        .env("PATH", crate::python::tool_path_env())
         .arg("--file").arg(&settings.file_path)
         .arg("--mode").arg(&settings.mode)
         .arg("--model-size").arg(&settings.model_size)

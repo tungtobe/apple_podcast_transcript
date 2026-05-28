@@ -54,11 +54,14 @@ function applyStatus(status) {
   // Python
   if (status.python_ok) {
     iconPython().textContent = '✅';
-    detailPython().textContent = `Python ${status.python_version}`;
+    detailPython().textContent = status.python_path
+      ? `Python ${status.python_version} at ${status.python_path}`
+      : `Python ${status.python_version}`;
   } else {
     iconPython().textContent = '❌';
     detailPython().innerHTML =
       `Python 3.10+ is required. Version found: ${status.python_version || 'none'}<br>
+       ${status.python_path ? `Detected at <code class="check-code">${escapeHtml(status.python_path)}</code><br>` : ''}
        Install with <code class="check-code">brew install python</code> or
        <a href="https://www.python.org/downloads/macos/" class="check-code">download Python for macOS ↗</a>.
        Then click Check Again.`;
@@ -90,11 +93,13 @@ function applyStatus(status) {
   // ffmpeg
   if (status.ffmpeg_ok) {
     iconFfmpeg().textContent = '✅';
-    detailFfmpeg().textContent = 'ffmpeg available.';
+    detailFfmpeg().textContent = status.ffmpeg_path
+      ? `ffmpeg available at ${status.ffmpeg_path}`
+      : 'ffmpeg available.';
   } else {
     iconFfmpeg().textContent = '⚠️';
     detailFfmpeg().innerHTML =
-      `ffmpeg not found. Install with:<br>
+      `ffmpeg/ffprobe not found. Install with:<br>
        <code class="check-code">brew install ffmpeg</code><br>
        If <code class="check-code">brew</code> is not available, install Homebrew first.`;
   }
@@ -155,6 +160,12 @@ function appendLog(line) {
 function showError(msg) {
   const el = document.getElementById('error-banner');
   if (el) { el.textContent = msg; el.removeAttribute('hidden'); }
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
 }
 
 // ── Expose to HTML ─────────────────────────────────────────────────────────
