@@ -194,15 +194,25 @@ function showBanner(msg, type = 'info') {
   bannerTimer = setTimeout(() => el.setAttribute('hidden', ''), 3500);
 }
 
-// ── Expose to HTML ─────────────────────────────────────────────────────────
-window.saveSettings = saveSettings;
-window.openCacheFolder = openCacheFolder;
-window.clearCache = clearCache;
-window.toggleApiKeyVisibility = toggleApiKeyVisibility;
-window.loadGeminiModels = loadGeminiModels;
+// ── Action dispatch ────────────────────────────────────────────────────────
+const ACTIONS = {
+  'save-settings':       saveSettings,
+  'open-cache-folder':   openCacheFolder,
+  'clear-cache':         clearCache,
+  'toggle-api-key':      toggleApiKeyVisibility,
+  'load-gemini-models':  loadGeminiModels,
+};
+
+function bindActions() {
+  document.querySelectorAll('[data-action]').forEach((el) => {
+    const handler = ACTIONS[el.dataset.action];
+    if (handler) el.addEventListener('click', handler);
+  });
+}
 
 // ── Init ───────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
+  bindActions();
   loadSettings();
   initScrollSpy();
 });

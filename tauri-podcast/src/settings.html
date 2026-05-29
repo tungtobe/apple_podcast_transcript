@@ -56,8 +56,8 @@
               <input type="password" id="gemini-api-key"
                      placeholder="AIza..." class="flex-1">
               <button id="btn-toggle-key" class="btn-secondary"
-                      onclick="toggleApiKeyVisibility()"
-                      style="white-space:nowrap" id="btn-toggle-key">👁 Show</button>
+                      data-action="toggle-api-key"
+                      style="white-space:nowrap">👁 Show</button>
             </div>
             <span class="hint">
               Get your key at
@@ -76,7 +76,7 @@
                      class="flex-1">
               <datalist id="gemini-models-list"></datalist>
               <button id="btn-load-gemini-models" class="btn-secondary"
-                      onclick="loadGeminiModels()"
+                      data-action="load-gemini-models"
                       style="white-space:nowrap">↻ Load Models</button>
             </div>
             <span id="gemini-model-status" class="hint">
@@ -175,7 +175,7 @@
             <div class="row">
               <input type="text" id="cache-dir"
                      placeholder="Leave blank for default" class="flex-1">
-              <button class="btn-secondary" onclick="openCacheFolder()">📂 Open</button>
+              <button class="btn-secondary" data-action="open-cache-folder">📂 Open</button>
             </div>
             <span class="hint">
               Leave blank to use the default location:<br>
@@ -189,7 +189,7 @@
           <p class="hint" style="margin-bottom:12px">
             Cached transcripts speed up reloads. Clearing them frees disk space.
           </p>
-          <button class="btn-danger" onclick="clearCache()">🗑 Clear All Cached Transcripts</button>
+          <button class="btn-danger" data-action="clear-cache">🗑 Clear All Cached Transcripts</button>
         </div>
       </div>
 
@@ -198,7 +198,7 @@
 
   <!-- Footer actions -->
   <div class="settings-footer" style="margin-top:auto">
-    <button class="btn-primary" onclick="saveSettings()">Save Settings</button>
+    <button class="btn-primary" data-action="save-settings">Save Settings</button>
     <button class="btn-secondary" data-route="main">Cancel</button>
   </div>
 
